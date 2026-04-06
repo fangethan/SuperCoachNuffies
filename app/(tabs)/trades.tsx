@@ -6,9 +6,10 @@ import {
 import { useRouter } from 'expo-router';
 import { usePlayers, useByeRounds } from '../../src/hooks/usePlayers';
 import { getTradeInTargets, getTradeOutTargets } from '../../src/utils/trade';
-import { COLORS, POSITIONS, CURRENT_YEAR, CURRENT_ROUND } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { PositionFilter } from '../../src/types';
+import { useAppStore } from '../../src/store/useAppStore';
 
 const POSITIONS_FILTER: PositionFilter[] = ['ALL', 'DEF', 'MID', 'FWD', 'RUC'];
 
@@ -16,8 +17,9 @@ export default function TradesScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<'in' | 'out'>('in');
   const [posFilter, setPosFilter] = useState<PositionFilter>('ALL');
+  const currentRound = useAppStore(s => s.currentRound);
 
-  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, CURRENT_ROUND);
+  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
 
   const tradeIn = useMemo(() => {
@@ -28,7 +30,7 @@ export default function TradesScreen() {
   const tradeOut = useMemo(() => {
     if (!players) return [];
     // For demo, treat all players as "my team" — replace with actual team when auth is set up
-    return getTradeOutTargets(players.slice(0, 22), byeMap ?? {}, CURRENT_ROUND);
+    return getTradeOutTargets(players.slice(0, 22), byeMap ?? {}, currentRound);
   }, [players, byeMap]);
 
   if (isLoading) {

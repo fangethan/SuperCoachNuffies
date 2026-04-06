@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePlayers } from '../../src/hooks/usePlayers';
-import { COLORS, POSITIONS, CURRENT_YEAR, CURRENT_ROUND } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { getCaptainRating, formatPrice } from '../../src/utils/scoring';
 import { Player } from '../../src/types';
 import { PositionFilterBar } from '../../src/components/PositionFilter';
@@ -18,8 +18,8 @@ interface CaptainCandidate {
 
 export default function CaptainsScreen() {
   const router = useRouter();
-  const { positionFilter } = useAppStore();
-  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, CURRENT_ROUND);
+  const { positionFilter, currentRound } = useAppStore();
+  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
 
   const candidates = useMemo<CaptainCandidate[]>(() => {
     if (!players) return [];
@@ -52,7 +52,7 @@ export default function CaptainsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.subtitle}>
-        Best captain picks for Round {CURRENT_ROUND} — ranked by form, matchup & venue
+        Best captain picks for Round {currentRound} — ranked by form, matchup & venue
       </Text>
       <PositionFilterBar />
       <FlatList

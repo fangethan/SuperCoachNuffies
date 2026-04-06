@@ -5,14 +5,16 @@ import {
 } from 'react-native';
 import { usePlayers } from '../../src/hooks/usePlayers';
 import { computeStatCorrelations } from '../../src/utils/correlation';
-import { COLORS, POSITIONS, CURRENT_YEAR, CURRENT_ROUND } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { PositionFilter } from '../../src/types';
+import { useAppStore } from '../../src/store/useAppStore';
 
 const POS_OPTIONS: PositionFilter[] = ['ALL', 'DEF', 'MID', 'FWD', 'RUC'];
 
 export default function StatDnaScreen() {
   const [position, setPosition] = useState<PositionFilter>('ALL');
-  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, CURRENT_ROUND);
+  const currentRound = useAppStore(s => s.currentRound);
+  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
 
   const correlations = useMemo(() => {
     if (!players) return [];
@@ -33,8 +35,8 @@ export default function StatDnaScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Scoring DNA</Text>
       <Text style={styles.subtitle}>
-        Which stats drive SuperCoach scores the most? Based on Round {CURRENT_ROUND} data.
-        Accuracy improves as the season progresses.
+        Which stats drive SuperCoach scores the most? Based on Round {currentRound} data.
+        Accuracy improves as the season progresses. Updates each round automatically.
       </Text>
 
       {/* Position selector */}
