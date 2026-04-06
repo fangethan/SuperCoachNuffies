@@ -17,10 +17,18 @@ export function PositionFilterBar() {
         return (
           <TouchableOpacity
             key={pos}
-            style={[styles.pill, active && { backgroundColor: color + '22', borderColor: color }]}
+            activeOpacity={0.8}
+            style={[
+              styles.pill,
+              active
+                ? { backgroundColor: color + '22', borderColor: color }
+                : { backgroundColor: 'transparent', borderColor: COLORS.border },
+            ]}
             onPress={() => setPositionFilter(pos)}
           >
-            <Text style={[styles.label, active && { color }]}>{pos}</Text>
+            <Text style={[styles.label, active ? { color } : { color: COLORS.textMuted }]}>
+              {pos}
+            </Text>
           </TouchableOpacity>
         );
       })}
@@ -31,7 +39,6 @@ export function PositionFilterBar() {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    gap: 8,
     paddingVertical: 10,
   },
   pill: {
@@ -39,11 +46,10 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: COLORS.border,
+    marginRight: 8,
   },
   label: {
     fontSize: 13,
     fontWeight: '600',
-    color: COLORS.textMuted,
   },
 });

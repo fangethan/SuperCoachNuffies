@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Player } from '../types';
 import { COLORS, POSITIONS } from '../constants';
-import { formatPrice, formatPriceChange, getPriceDirection } from '../utils/scoring';
+import { formatPriceChange, getPriceDirection } from '../utils/scoring';
 
 interface Props {
   player: Player;
@@ -11,7 +11,7 @@ interface Props {
   rank?: number;
 }
 
-export function PlayerCard({ player, byeRound, rank }: Props) {
+export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank }: Props) {
   const router = useRouter();
   const stats = player.player_stats?.[0];
   const position = player.positions?.[0]?.position ?? 'MID';
@@ -22,7 +22,7 @@ export function PlayerCard({ player, byeRound, rank }: Props) {
     <TouchableOpacity
       style={styles.card}
       onPress={() => router.push(`/player/${player.id}`)}
-      activeOpacity={0.75}
+      activeOpacity={1}
     >
       {/* Left: rank + position */}
       <View style={styles.left}>
@@ -40,25 +40,25 @@ export function PlayerCard({ player, byeRound, rank }: Props) {
           {player.first_name} {player.last_name}
         </Text>
         <View style={styles.metaRow}>
-          <Text style={styles.team}>{player.team.abbrev}</Text>
-          {player.injury_suspension_status && (
+          <Text style={styles.team}>{player.team?.abbrev ?? ''}</Text>
+          {player.injury_suspension_status ? (
             <View style={styles.injBadge}>
               <Text style={styles.injText}>{player.injury_suspension_status}</Text>
             </View>
-          )}
-          {byeRound && (
+          ) : null}
+          {byeRound ? (
             <View style={styles.byeBadge}>
               <Text style={styles.byeText}>BYE R{byeRound}</Text>
             </View>
-          )}
+          ) : null}
         </View>
       </View>
 
       {/* Right: score + price */}
-      {stats && (
+      {stats ? (
         <View style={styles.right}>
           <Text style={styles.score}>{stats.points ?? '-'}</Text>
-          <Text style={styles.avg}>avg {stats.avg3?.toFixed(0)}</Text>
+          <Text style={styles.avg}>avg {stats.avg3?.toFixed(0) ?? '-'}</Text>
           <Text style={[
             styles.priceChange,
             priceDir === 'up' ? styles.up : priceDir === 'down' ? styles.down : styles.neutral,
@@ -66,10 +66,10 @@ export function PlayerCard({ player, byeRound, rank }: Props) {
             {formatPriceChange(stats.price_change)}
           </Text>
         </View>
-      )}
+      ) : null}
     </TouchableOpacity>
   );
-}
+});
 
 const styles = StyleSheet.create({
   card: {
@@ -115,17 +115,18 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
   },
   team: {
     fontSize: 12,
     color: COLORS.textSecondary,
+    marginRight: 6,
   },
   injBadge: {
     backgroundColor: COLORS.danger + '33',
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 1,
+    marginRight: 6,
   },
   injText: {
     fontSize: 10,
