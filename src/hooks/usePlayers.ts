@@ -38,10 +38,14 @@ export function useHistoricalPlayers(playerId: number, years: number[], round: n
   });
 }
 
-export function useFilteredPlayers(players: Player[]) {
-  const { positionFilter, sortBy, searchQuery } = useAppStore();
+export function useFilteredPlayers(players: Player[], weeklyPriceMap: Record<number, number> = {}) {
+  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, myTeamIds } = useAppStore();
 
   let filtered = players;
+
+  if (showOwnedOnly && myTeamIds.length > 0) {
+    filtered = filtered.filter(p => myTeamIds.includes(p.id));
+  }
 
   if (positionFilter !== 'ALL') {
     filtered = filtered.filter(p =>
@@ -61,17 +65,29 @@ export function useFilteredPlayers(players: Player[]) {
     const sa = a.player_stats?.[0];
     const sb = b.player_stats?.[0];
     if (!sa || !sb) return 0;
+    let diff = 0;
     switch (sortBy) {
-      case 'avg':    return (sb.avg ?? 0) - (sa.avg ?? 0);
-      case 'avg3':   return (sb.avg3 ?? 0) - (sa.avg3 ?? 0);
-      case 'avg5':   return (sb.avg5 ?? 0) - (sa.avg5 ?? 0);
-      case 'price':  return (sb.price ?? 0) - (sa.price ?? 0);
-      case 'price_change': return (sb.price_change ?? 0) - (sa.price_change ?? 0);
-      case 'points': return (sb.points ?? 0) - (sa.points ?? 0);
-      case 'owned':  return (sb.owned ?? 0) - (sa.owned ?? 0);
-      case 'ppts':   return (sa.ppts ?? 0) - (sb.ppts ?? 0); // low BE = good
-      default:       return 0;
+      case 'avg':    diff = (sb.avg ?? 0) - (sa.avg ?? 0); break;
+      case 'avg3':   diff = (sb.avg3 ?? 0) - (sa.avg3 ?? 0); break;
+      case 'avg5':   diff = (sb.avg5 ?? 0) - (sa.avg5 ?? 0); break;
+      case 'price':  diff = (sb.price ?? 0) - (sa.price ?? 0); break;
+      case 'price_change': {
+        // Use previous round's price_change (most recently calculated weekly change)
+        const aChange = weeklyPriceMap[a.id] ?? sa.price_change ?? 0;
+        const bChange = weeklyPriceMap[b.id] ?? sb.price_change ?? 0;
+        diff = bChange - aChange;
+        break;
+      }
+      case 'points': {
+        const d = (sb.points ?? 0) - (sa.points ?? 0);
+        diff = d !== 0 ? d : (sb.total_points ?? 0) - (sa.total_points ?? 0);
+        break;
+      }
+      case 'owned':  diff = (sb.owned ?? 0) - (sa.owned ?? 0); break;
+      case 'ppts':   diff = (sa.ppts ?? 0) - (sb.ppts ?? 0); break; // low BE = good
+      default: diff = 0;
     }
+    return sortAscending ? -diff : diff;
   });
 
   return filtered;

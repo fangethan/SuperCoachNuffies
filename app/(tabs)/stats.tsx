@@ -35,8 +35,8 @@ export default function StatDnaScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Scoring DNA</Text>
       <Text style={styles.subtitle}>
-        Which stats drive SuperCoach scores the most? Based on Round {currentRound} data.
-        Accuracy improves as the season progresses. Updates each round automatically.
+        Which stats drive SuperCoach scores the most? Based on the SC scoring formula
+        weighted by typical positional activity. Green = boosts score, red = hurts score.
       </Text>
 
       {/* Position selector */}
@@ -85,7 +85,8 @@ export default function StatDnaScreen() {
       </View>
 
       <Text style={styles.footnote}>
-        Correlation coefficient: 1.0 = perfectly predicts SC score, 0.0 = no relationship, negative = hurts score.
+        Score = formula weight × average times per game × positional activity. Selecting a position
+        boosts stats most common for that role (e.g. RUC shows hitouts first).
       </Text>
     </ScrollView>
   );

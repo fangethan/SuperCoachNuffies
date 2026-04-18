@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
@@ -22,8 +22,20 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'BE', value: 'ppts' },
 ];
 
+// Sort option short labels shown on card
+export const SORT_CARD_LABEL: Record<SortOption, string> = {
+  avg: 'avg',
+  avg3: 'L3 avg',
+  avg5: 'L5 avg',
+  points: 'score',
+  price: 'price',
+  price_change: '±$',
+  owned: 'owned',
+  ppts: 'BE',
+};
+
 export default function PlayersScreen() {
-  const { searchQuery, setSearchQuery, sortBy, setSortBy, currentRound, setCurrentRound } = useAppStore();
+  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, currentRound, setCurrentRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
 
   // Auto-detect current round
   const { data: detectedRound } = useCurrentRound(CURRENT_YEAR);
@@ -31,7 +43,19 @@ export default function PlayersScreen() {
 
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, round);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
-  const filtered = useFilteredPlayers(players ?? []);
+
+  // Fetch previous round to get the most recently calculated price changes.
+  // Prices update after each round completes — current round always shows price_change=0.
+  const prevRound = Math.max(1, round - 1);
+  const { data: prevPlayers } = usePlayers(CURRENT_YEAR, prevRound);
+  const weeklyPriceMap = useMemo(() => {
+    if (!prevPlayers) return {} as Record<number, number>;
+    return Object.fromEntries(
+      prevPlayers.map(p => [p.id, p.player_stats?.[0]?.price_change ?? 0])
+    ) as Record<number, number>;
+  }, [prevPlayers]);
+
+  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap);
 
   // Memoised render for FlatList performance
   const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => (
@@ -39,8 +63,10 @@ export default function PlayersScreen() {
       player={item}
       rank={index + 1}
       byeRound={byeMap?.[item.team?.name ?? '']}
+      isOwned={myTeamIds.includes(item.id)}
+      weeklyPriceChange={weeklyPriceMap[item.id]}
     />
-  ), [byeMap]);
+  ), [byeMap, myTeamIds, weeklyPriceMap]);
 
   const keyExtractor = useCallback((item: Player) => String(item.id), []);
 
@@ -80,10 +106,23 @@ export default function PlayersScreen() {
         clearButtonMode="while-editing"
       />
 
-      {/* Position filter */}
-      <PositionFilterBar />
+      {/* Position filter + Owned toggle */}
+      <View style={styles.filterRow}>
+        <PositionFilterBar />
+        {myTeamIds.length > 0 ? (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[styles.ownedToggle, showOwnedOnly && styles.ownedToggleActive]}
+            onPress={() => setShowOwnedOnly(!showOwnedOnly)}
+          >
+            <Text style={[styles.ownedToggleLabel, showOwnedOnly && styles.ownedToggleLabelActive]}>
+              My Team
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
-      {/* Sort options */}
+      {/* Sort options + direction toggle */}
       <View style={styles.sortRow}>
         {SORT_OPTIONS.map(opt => (
           <TouchableOpacity
@@ -97,6 +136,13 @@ export default function PlayersScreen() {
             </Text>
           </TouchableOpacity>
         ))}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[styles.sortPill, styles.sortDirBtn]}
+          onPress={toggleSortDirection}
+        >
+          <Text style={styles.sortDirLabel}>{sortAscending ? '↑' : '↓'}</Text>
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.count}>{filtered.length} players</Text>
@@ -170,6 +216,17 @@ const styles = StyleSheet.create({
   sortActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
   sortLabel: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
   sortLabelActive: { color: COLORS.primary },
+  sortDirBtn: { borderColor: COLORS.border, minWidth: 36, alignItems: 'center' },
+  sortDirLabel: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '700' },
   count: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
   list: { paddingBottom: 20 },
+  filterRow: { flexDirection: 'row', alignItems: 'center' },
+  ownedToggle: {
+    paddingHorizontal: 12, paddingVertical: 6,
+    borderRadius: 20, borderWidth: 1, borderColor: COLORS.border,
+    marginLeft: 8, marginBottom: 8,
+  },
+  ownedToggleActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
+  ownedToggleLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  ownedToggleLabelActive: { color: COLORS.primary },
 });

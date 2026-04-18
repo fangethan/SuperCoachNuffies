@@ -17,7 +17,7 @@ export default function TradesScreen() {
   const router = useRouter();
   const [tab, setTab] = useState<'in' | 'out'>('in');
   const [posFilter, setPosFilter] = useState<PositionFilter>('ALL');
-  const currentRound = useAppStore(s => s.currentRound);
+  const { currentRound, myTeamIds } = useAppStore();
 
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
@@ -29,9 +29,11 @@ export default function TradesScreen() {
 
   const tradeOut = useMemo(() => {
     if (!players) return [];
-    // For demo, treat all players as "my team" — replace with actual team when auth is set up
-    return getTradeOutTargets(players.slice(0, 22), byeMap ?? {}, currentRound);
-  }, [players, byeMap]);
+    const myPlayers = myTeamIds.length > 0
+      ? players.filter(p => myTeamIds.includes(p.id))
+      : players.slice(0, 22); // demo fallback when not synced
+    return getTradeOutTargets(myPlayers, byeMap ?? {}, currentRound);
+  }, [players, byeMap, myTeamIds, currentRound]);
 
   if (isLoading) {
     return (
@@ -43,8 +45,18 @@ export default function TradesScreen() {
 
   const data = tab === 'in' ? tradeIn : tradeOut;
 
+  const isTeamSynced = myTeamIds.length > 0;
+
   return (
     <View style={styles.container}>
+      {!isTeamSynced && tab === 'out' ? (
+        <TouchableOpacity style={styles.syncNote} onPress={() => router.push('/(tabs)/myteam')} activeOpacity={0.8}>
+          <Text style={styles.syncNoteText}>
+            Sync your team in the My Team tab for personalised trade-out picks
+          </Text>
+          <Text style={styles.syncNoteLink}>Tap to go there →</Text>
+        </TouchableOpacity>
+      ) : null}
       {/* Tab toggle */}
       <View style={styles.tabs}>
         <TouchableOpacity
@@ -148,6 +160,13 @@ const styles = StyleSheet.create({
   tabLabel: { fontWeight: '700', fontSize: 14, color: COLORS.textMuted },
   tabLabelActive: { color: COLORS.success },
   tabLabelActiveOut: { color: COLORS.danger },
+  syncNote: {
+    backgroundColor: COLORS.warning + '18', borderRadius: 8,
+    padding: 10, marginBottom: 8,
+    borderWidth: 1, borderColor: COLORS.warning + '33',
+  },
+  syncNoteText: { fontSize: 12, color: COLORS.warning, textAlign: 'center' },
+  syncNoteLink: { fontSize: 12, color: COLORS.warning, textAlign: 'center', fontWeight: '700', marginTop: 4 },
   posRow: { marginBottom: 10, flexGrow: 0 },
   posPill: {
     paddingHorizontal: 14, paddingVertical: 6,

@@ -13,6 +13,9 @@ interface AppState {
   setPositionFilter: (pos: PositionFilter) => void;
   sortBy: SortOption;
   setSortBy: (sort: SortOption) => void;
+  sortAscending: boolean;
+  setSortAscending: (v: boolean) => void;
+  toggleSortDirection: () => void;
   searchQuery: string;
   setSearchQuery: (q: string) => void;
 
@@ -21,6 +24,10 @@ interface AppState {
   setMyTeamIds: (ids: number[]) => void;
   addToMyTeam: (id: number) => void;
   removeFromMyTeam: (id: number) => void;
+
+  // Owned filter
+  showOwnedOnly: boolean;
+  setShowOwnedOnly: (v: boolean) => void;
 
   // Auth token for SuperCoach personal features
   scAuthToken: string | null;
@@ -35,7 +42,10 @@ export const useAppStore = create<AppState>((set) => ({
   positionFilter: 'ALL',
   setPositionFilter: (pos) => set({ positionFilter: pos }),
   sortBy: 'avg',
-  setSortBy: (sort) => set({ sortBy: sort }),
+  setSortBy: (sort) => set({ sortBy: sort, sortAscending: false }),
+  sortAscending: false,
+  setSortAscending: (v) => set({ sortAscending: v }),
+  toggleSortDirection: () => set(s => ({ sortAscending: !s.sortAscending })),
   searchQuery: '',
   setSearchQuery: (q) => set({ searchQuery: q }),
 
@@ -49,6 +59,9 @@ export const useAppStore = create<AppState>((set) => ({
   removeFromMyTeam: (id) => set(state => ({
     myTeamIds: state.myTeamIds.filter(i => i !== id),
   })),
+
+  showOwnedOnly: false,
+  setShowOwnedOnly: (v) => set({ showOwnedOnly: v }),
 
   scAuthToken: null,
   setScAuthToken: (token) => set({ scAuthToken: token }),

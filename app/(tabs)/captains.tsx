@@ -18,14 +18,17 @@ interface CaptainCandidate {
 
 export default function CaptainsScreen() {
   const router = useRouter();
-  const { positionFilter, currentRound } = useAppStore();
+  const { positionFilter, currentRound, myTeamIds } = useAppStore();
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
+  const isTeamSynced = myTeamIds.length > 0;
 
   const candidates = useMemo<CaptainCandidate[]>(() => {
     if (!players) return [];
     return players
       .filter(p => {
         if (!p.active || p.injury_suspension_status) return false;
+        // If team is synced, only show players from my team
+        if (isTeamSynced && !myTeamIds.includes(p.id)) return false;
         if (positionFilter !== 'ALL' && !p.positions?.some(pos => pos.position === positionFilter)) return false;
         const stats = p.player_stats?.[0];
         return stats && stats.total_games >= 2 && stats.avg3 > 60;
@@ -52,7 +55,9 @@ export default function CaptainsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.subtitle}>
-        Best captain picks for Round {currentRound} — ranked by form, matchup & venue
+        {isTeamSynced
+          ? `Your team's best captain picks for Round ${currentRound}`
+          : `Best captain picks for Round ${currentRound} — ranked by form, matchup & venue`}
       </Text>
       <PositionFilterBar />
       <FlatList
