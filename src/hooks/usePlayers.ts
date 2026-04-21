@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
+import { footywireApi } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
@@ -8,6 +9,14 @@ export function usePlayers(year: number, round: number) {
   return useQuery({
     queryKey: ['players', year, round],
     queryFn: () => supercoachApi.fetchPlayers(year, round),
+    staleTime: 1000 * 60 * 30, // 30 min cache
+  });
+}
+
+export function useFootywireBreakevens() {
+  return useQuery({
+    queryKey: ['footywire', 'breakevens', 'v6'],
+    queryFn: () => footywireApi.fetchBreakevenMap(),
     staleTime: 1000 * 60 * 30, // 30 min cache
   });
 }
@@ -38,7 +47,11 @@ export function useHistoricalPlayers(playerId: number, years: number[], round: n
   });
 }
 
-export function useFilteredPlayers(players: Player[], weeklyPriceMap: Record<number, number> = {}) {
+export function useFilteredPlayers(
+  players: Player[],
+  weeklyPriceMap: Record<number, number> = {},
+  fwBreakevenById: Record<number, number> = {},
+) {
   const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, myTeamIds } = useAppStore();
 
   let filtered = players;
@@ -84,7 +97,15 @@ export function useFilteredPlayers(players: Player[], weeklyPriceMap: Record<num
         break;
       }
       case 'owned':  diff = (sb.owned ?? 0) - (sa.owned ?? 0); break;
-      case 'ppts':   diff = (sa.ppts ?? 0) - (sb.ppts ?? 0); break; // low BE = good
+      case 'ppts': {
+        const abe = fwBreakevenById[a.id] ?? sa.ppts ?? null;
+        const bbe = fwBreakevenById[b.id] ?? sb.ppts ?? null;
+        if (abe === null && bbe === null) { diff = 0; break; }
+        if (abe === null) { diff = 1; break; }  // push nulls to bottom
+        if (bbe === null) { diff = -1; break; }
+        diff = bbe - abe; // high BE first by default
+        break;
+      }
       default: diff = 0;
     }
     return sortAscending ? -diff : diff;

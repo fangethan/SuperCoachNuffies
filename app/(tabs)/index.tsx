@@ -3,7 +3,8 @@ import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { usePlayers, useByeRounds, useFilteredPlayers } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { footywireApi } from '../../src/api/footywire';
 import { useCurrentRound } from '../../src/hooks/useCurrentRound';
 import { PlayerCard } from '../../src/components/PlayerCard';
 import { PositionFilterBar } from '../../src/components/PositionFilter';
@@ -43,6 +44,7 @@ export default function PlayersScreen() {
 
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, round);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
+  const { data: fwMap, isLoading: fwLoading, error: fwError } = useFootywireBreakevens();
 
   // Fetch previous round to get the most recently calculated price changes.
   // Prices update after each round completes — current round always shows price_change=0.
@@ -55,18 +57,35 @@ export default function PlayersScreen() {
     ) as Record<number, number>;
   }, [prevPlayers]);
 
-  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap);
+  const fwBreakevenById = useMemo(() => {
+    if (!players || !fwMap) return {} as Record<number, number>;
+    const map: Record<number, number> = {};
+    for (const p of players) {
+      const key = footywireApi.normaliseName(`${p.first_name} ${p.last_name}`);
+      const fw = fwMap[key];
+      if (fw !== undefined) map[p.id] = fw.breakeven;
+    }
+    return map;
+  }, [players, fwMap]);
+
+  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById);
 
   // Memoised render for FlatList performance
-  const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => (
-    <PlayerCard
-      player={item}
-      rank={index + 1}
-      byeRound={byeMap?.[item.team?.name ?? '']}
-      isOwned={myTeamIds.includes(item.id)}
-      weeklyPriceChange={weeklyPriceMap[item.id]}
-    />
-  ), [byeMap, myTeamIds, weeklyPriceMap]);
+  const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => {
+    const fwKey = footywireApi.normaliseName(`${item.first_name} ${item.last_name}`);
+    const fw = fwMap?.[fwKey];
+    return (
+      <PlayerCard
+        player={item}
+        rank={index + 1}
+        byeRound={byeMap?.[item.team?.name ?? '']}
+        isOwned={myTeamIds.includes(item.id)}
+        weeklyPriceChange={weeklyPriceMap[item.id]}
+        fwInjuryStatus={fw?.injuryStatus ?? null}
+        fwBreakeven={fw?.breakeven}
+      />
+    );
+  }, [byeMap, myTeamIds, weeklyPriceMap, fwMap]);
 
   const keyExtractor = useCallback((item: Player) => String(item.id), []);
 
@@ -95,6 +114,13 @@ export default function PlayersScreen() {
         <View style={styles.roundDot} />
         <Text style={styles.roundSub}>Live data</Text>
       </View>
+
+      {/* Footywire debug — remove once BE is confirmed working */}
+      {sortBy === 'ppts' ? (
+        <Text style={styles.fwDebug}>
+          {fwLoading ? 'BE: loading…' : fwError ? `BE: error — ${String(fwError)}` : `BE: ${Object.keys(fwMap ?? {}).length} players loaded (check Metro logs for HTML sample)`}
+        </Text>
+      ) : null}
 
       {/* Search */}
       <TextInput
@@ -219,6 +245,7 @@ const styles = StyleSheet.create({
   sortDirBtn: { borderColor: COLORS.border, minWidth: 36, alignItems: 'center' },
   sortDirLabel: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '700' },
   count: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
+  fwDebug: { fontSize: 11, color: COLORS.warning, marginBottom: 4 },
   list: { paddingBottom: 20 },
   filterRow: { flexDirection: 'row', alignItems: 'center' },
   ownedToggle: {

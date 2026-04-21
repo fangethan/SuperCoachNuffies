@@ -12,15 +12,16 @@ interface Props {
   rank?: number;
   isOwned?: boolean;
   weeklyPriceChange?: number;
+  fwInjuryStatus?: 'INJ' | 'SUS' | null;
+  fwBreakeven?: number;
 }
 
-export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isOwned, weeklyPriceChange }: Props) {
+export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isOwned, weeklyPriceChange, fwInjuryStatus, fwBreakeven }: Props) {
   const router = useRouter();
   const sortBy = useAppStore(s => s.sortBy);
   const currentRound = useAppStore(s => s.currentRound);
   const stats = player.player_stats?.[0];
-  const position = player.positions?.[0]?.position ?? 'MID';
-  const posConfig = POSITIONS[position as keyof typeof POSITIONS];
+  const positions = player.positions?.map(p => p.position) ?? ['MID'];
 
   // Only show a bye if it's in the future
   const futureBye = byeRound && byeRound > currentRound ? byeRound : undefined;
@@ -63,12 +64,14 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isO
       }
       case 'owned':
         return { primaryValue: `${(stats.owned ?? 0).toFixed(1)}%`, primaryLabel: 'owned', primaryColor: COLORS.textPrimary };
-      case 'ppts':
+      case 'ppts': {
+        const be = fwBreakeven ?? stats.ppts ?? null;
         return {
-          primaryValue: String(stats.ppts ?? '-'),
+          primaryValue: be !== null && be !== 0 ? String(be) : '-',
           primaryLabel: 'BE',
-          primaryColor: (stats.ppts ?? 0) > (stats.avg3 ?? 0) ? COLORS.danger : COLORS.success,
+          primaryColor: be !== null && be > (stats.avg3 ?? 0) ? COLORS.danger : COLORS.success,
         };
+      }
       default: // 'avg'
         return { primaryValue: stats.avg?.toFixed(1) ?? '-', primaryLabel: 'avg', primaryColor: COLORS.textPrimary };
     }
@@ -80,14 +83,28 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isO
       onPress={() => router.push(`/player/${player.id}`)}
       activeOpacity={0.85}
     >
-      {/* Left: rank + position */}
+      {/* Left: rank + position(s) */}
       <View style={styles.left}>
         {rank !== undefined ? (
           <Text style={styles.rank}>#{rank}</Text>
         ) : null}
-        <View style={[styles.positionBadge, { backgroundColor: posConfig?.color ?? COLORS.textMuted }]}>
-          <Text style={styles.positionText}>{position}</Text>
-        </View>
+        {positions.length > 1 ? (
+          <View style={styles.dppBadge}>
+            {positions.map((pos, i) => {
+              const cfg = POSITIONS[pos as keyof typeof POSITIONS];
+              return (
+                <React.Fragment key={pos}>
+                  {i > 0 && <Text style={styles.dppSlash}>/</Text>}
+                  <Text style={[styles.dppText, { color: cfg?.color ?? COLORS.textMuted }]}>{pos}</Text>
+                </React.Fragment>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={[styles.positionBadge, { backgroundColor: POSITIONS[positions[0] as keyof typeof POSITIONS]?.color ?? COLORS.textMuted }]}>
+            <Text style={styles.positionText}>{positions[0]}</Text>
+          </View>
+        )}
       </View>
 
       {/* Centre: name + team */}
@@ -104,11 +121,22 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isO
         </View>
         <View style={styles.metaRow}>
           <Text style={styles.team}>{player.team?.abbrev ?? ''}</Text>
-          {player.injury_suspension_status ? (
-            <View style={styles.injBadge}>
-              <Text style={styles.injText}>{player.injury_suspension_status}</Text>
-            </View>
-          ) : null}
+          {(() => {
+            const scInj = player.injury_suspension_status;
+            const isSusp = fwInjuryStatus === 'SUS' || (!fwInjuryStatus && /susp/i.test((scInj ?? '') + (player.injury_suspension_status_text ?? '')));
+            const isInj = fwInjuryStatus === 'INJ' || (!fwInjuryStatus && !!scInj && !isSusp);
+            if (isSusp) return (
+              <View style={styles.suspBadge}>
+                <Text style={styles.suspText}>SUSP</Text>
+              </View>
+            );
+            if (isInj) return (
+              <View style={styles.injBadge}>
+                <Text style={styles.injCross}>✚</Text>
+              </View>
+            );
+            return null;
+          })()}
           {futureBye ? (
             <View style={styles.byeBadge}>
               <Text style={styles.byeText}>BYE R{futureBye}</Text>
@@ -162,6 +190,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
   },
+  dppBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  dppText: {
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  dppSlash: {
+    fontSize: 10,
+    fontWeight: '400',
+    color: COLORS.textMuted,
+    marginHorizontal: 1,
+  },
   centre: {
     flex: 1,
     marginRight: 8,
@@ -205,10 +253,22 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     marginRight: 6,
   },
-  injText: {
+  injCross: {
+    fontSize: 12,
+    color: COLORS.danger,
+    fontWeight: '700',
+  },
+  suspBadge: {
+    backgroundColor: COLORS.danger + '33',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginRight: 6,
+  },
+  suspText: {
     fontSize: 10,
     color: COLORS.danger,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   byeBadge: {
     backgroundColor: COLORS.warning + '33',

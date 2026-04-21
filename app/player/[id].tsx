@@ -1,16 +1,18 @@
-import React from 'react';
+import React, { Fragment } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens } from '../../src/hooks/usePlayers';
 import { useAppStore } from '../../src/store/useAppStore';
 import { getScoreBreakdown, formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
+import { footywireApi } from '../../src/api/footywire';
 
 export default function PlayerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const currentRound = useAppStore(s => s.currentRound);
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
+  const { data: fwMap } = useFootywireBreakevens();
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
@@ -31,31 +33,69 @@ export default function PlayerDetailScreen() {
     );
   }
 
-  const pos = player.positions?.[0]?.position ?? 'MID';
+  const allPositions = player.positions?.map(p => p.position) ?? ['MID'];
+  const pos = allPositions[0];
   const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
+  const isDPP = allPositions.length > 1;
   const priceDir = getPriceDirection(stats.price_change ?? 0);
   const breakdown = getScoreBreakdown(stats);
   const byeRound = byeMap?.[player.team?.name ?? ''];
 
+  const playerKey = footywireApi.normaliseName(`${player.first_name} ${player.last_name}`);
+  const fwPlayer = fwMap?.[playerKey];
+
+  // Prefer footywire injury/suspension status, fall back to SC API
+  const fwInjury = fwPlayer?.injuryStatus ?? null;
+  const scInjStatus = player.injury_suspension_status;
+  const scInjText = player.injury_suspension_status_text ?? scInjStatus ?? '';
+  const isSusp = fwInjury === 'SUS' || /susp/i.test(scInjText + (scInjStatus ?? ''));
+  const isInj = fwInjury === 'INJ' || (!fwInjury && !!scInjStatus && !isSusp);
+  const showInjBanner = isSusp || isInj;
+  const injBannerText = scInjText || (isSusp ? 'Suspended' : 'Injured');
+
+  // Prefer footywire breakeven, fall back to SC API ppts
+  const ppts = fwPlayer?.breakeven ?? stats.ppts ?? 0;
+  const likelihood = fwPlayer?.likelihood ?? null;
+  const avg3 = stats.avg3 ?? 0;
+  const beStatus = ppts === 0 ? 'unknown' : ppts > avg3 * 1.15 ? 'danger' : ppts > avg3 ? 'warning' : 'safe';
+
   const oppavg = stats.oppavg ?? 0;
   const venavg = stats.venavg ?? 0;
   const avg = stats.avg ?? 0;
-  const avg3 = stats.avg3 ?? 0;
   const avg5 = stats.avg5 ?? 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={[styles.posBadge, { backgroundColor: posColor }]}>
-          <Text style={styles.posText}>{pos}</Text>
-        </View>
+        {isDPP ? (
+          <View style={styles.dppRow}>
+            {allPositions.map((p, i) => {
+              const col = POSITIONS[p as keyof typeof POSITIONS]?.color ?? COLORS.primary;
+              return (
+                <React.Fragment key={p}>
+                  {i > 0 && <Text style={styles.dppSlash}>/</Text>}
+                  <View style={[styles.posBadge, { backgroundColor: col }]}>
+                    <Text style={styles.posText}>{p}</Text>
+                  </View>
+                </React.Fragment>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={[styles.posBadge, { backgroundColor: posColor }]}>
+            <Text style={styles.posText}>{pos}</Text>
+          </View>
+        )}
         <Text style={styles.name}>{player.first_name} {player.last_name}</Text>
         <Text style={styles.team}>{player.team?.name ?? ''}</Text>
-        {player.injury_suspension_status ? (
+        {showInjBanner ? (
           <View style={styles.injBanner}>
-            <Text style={styles.injText}>
-              {player.injury_suspension_status_text ?? player.injury_suspension_status}
+            <Text style={styles.injBannerLabel}>
+              {isSusp ? 'SUSPENDED' : '✚  INJURED'}
+            </Text>
+            <Text style={styles.injBannerText}>
+              {injBannerText}
             </Text>
           </View>
         ) : null}
@@ -85,16 +125,51 @@ export default function PlayerDetailScreen() {
           </Text>
         </View>
         <View style={styles.priceBox}>
-          <Text style={styles.priceLabel}>Breakeven</Text>
-          <Text style={[styles.priceValue, (stats.ppts ?? 0) > avg3 ? styles.down : styles.up]}>
-            {stats.ppts ?? '-'}
-          </Text>
-        </View>
-        <View style={styles.priceBox}>
           <Text style={styles.priceLabel}>Owned</Text>
           <Text style={styles.priceValue}>{(stats.owned ?? 0).toFixed(1)}%</Text>
         </View>
       </View>
+
+      {/* Breakeven section */}
+      {ppts > 0 ? (
+        <View style={[
+          styles.beSection,
+          beStatus === 'danger' ? styles.beDanger :
+          beStatus === 'warning' ? styles.beWarning : styles.beSafe,
+        ]}>
+          <View style={styles.beRow}>
+            <View>
+              <Text style={styles.beLabel}>Breakeven</Text>
+              <Text style={[
+                styles.beValue,
+                beStatus === 'danger' ? styles.down :
+                beStatus === 'warning' ? styles.warn : styles.up,
+              ]}>
+                {ppts}
+              </Text>
+            </View>
+            <View style={styles.beRight}>
+              <Text style={styles.beContext}>
+                {beStatus === 'danger'
+                  ? `Needs ${ppts} pts to stop price drop — ${ppts - avg3 > 0 ? `${(ppts - avg3).toFixed(0)} above` : 'at'} L3 avg`
+                  : beStatus === 'warning'
+                  ? `Slightly above L3 avg (${avg3.toFixed(0)}) — price may dip`
+                  : `Below L3 avg (${avg3.toFixed(0)}) — price rising`}
+                {likelihood !== null ? `\nLikelihood of hitting BE: ${likelihood}%` : ''}
+              </Text>
+              <View style={[
+                styles.bePill,
+                beStatus === 'danger' ? styles.bePillDanger :
+                beStatus === 'warning' ? styles.bePillWarning : styles.bePillSafe,
+              ]}>
+                <Text style={styles.bePillText}>
+                  {beStatus === 'danger' ? 'TRADE OUT' : beStatus === 'warning' ? 'MONITOR' : 'HOLD / BUY'}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       {/* Matchup */}
       <View style={styles.section}>
@@ -211,13 +286,22 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', marginBottom: 20 },
   posBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4, marginBottom: 8 },
   posText: { fontWeight: '800', fontSize: 13, color: '#fff' },
+  dppRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  dppSlash: { fontSize: 16, fontWeight: '300', color: COLORS.textMuted, marginHorizontal: 4, marginBottom: 8 },
   name: { fontSize: 26, fontWeight: '800', color: COLORS.textPrimary, textAlign: 'center' },
   team: { fontSize: 15, color: COLORS.textSecondary, marginTop: 2 },
   injBanner: {
-    backgroundColor: COLORS.danger + '22', borderRadius: 8,
-    paddingHorizontal: 12, paddingVertical: 6, marginTop: 8,
+    backgroundColor: COLORS.danger + '22', borderRadius: 10,
+    paddingHorizontal: 14, paddingVertical: 10, marginTop: 10,
+    borderWidth: 1, borderColor: COLORS.danger + '44',
+    alignItems: 'center', minWidth: 200,
   },
-  injText: { color: COLORS.danger, fontWeight: '600', fontSize: 13 },
+  injBannerLabel: {
+    fontSize: 11, fontWeight: '800', color: COLORS.danger,
+    letterSpacing: 1, marginBottom: 3,
+  },
+  injBannerText: { color: COLORS.danger, fontWeight: '500', fontSize: 13, textAlign: 'center' },
+  warn: { color: COLORS.warning },
   statsGrid: { flexDirection: 'row', marginBottom: 12 },
   priceRow: {
     flexDirection: 'row', marginBottom: 16,
@@ -253,4 +337,26 @@ const styles = StyleSheet.create({
   breakdownBar: { height: '100%', borderRadius: 3 },
   breakdownPts: { width: 36, fontSize: 12, fontWeight: '700', textAlign: 'right' },
   prevSeason: { flexDirection: 'row' },
+
+  // Breakeven section
+  beSection: {
+    borderRadius: 12, padding: 14, marginBottom: 12,
+    borderWidth: 1,
+  },
+  beSafe: { backgroundColor: COLORS.success + '11', borderColor: COLORS.success + '33' },
+  beWarning: { backgroundColor: COLORS.warning + '11', borderColor: COLORS.warning + '33' },
+  beDanger: { backgroundColor: COLORS.danger + '11', borderColor: COLORS.danger + '33' },
+  beRow: { flexDirection: 'row', alignItems: 'center' },
+  beLabel: { fontSize: 11, color: COLORS.textMuted, marginBottom: 2 },
+  beValue: { fontSize: 28, fontWeight: '800' },
+  beRight: { flex: 1, marginLeft: 16 },
+  beContext: { fontSize: 12, color: COLORS.textSecondary, lineHeight: 18, marginBottom: 8 },
+  bePill: {
+    alignSelf: 'flex-start', borderRadius: 6,
+    paddingHorizontal: 10, paddingVertical: 4,
+  },
+  bePillSafe: { backgroundColor: COLORS.success + '22' },
+  bePillWarning: { backgroundColor: COLORS.warning + '22' },
+  bePillDanger: { backgroundColor: COLORS.danger + '22' },
+  bePillText: { fontSize: 11, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: 0.5 },
 });
