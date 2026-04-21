@@ -44,7 +44,7 @@ export default function PlayersScreen() {
 
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, round);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
-  const { data: fwMap, isLoading: fwLoading, error: fwError } = useFootywireBreakevens();
+  const { data: fwMap } = useFootywireBreakevens();
 
   // Fetch previous round to get the most recently calculated price changes.
   // Prices update after each round completes — current round always shows price_change=0.
@@ -112,13 +112,6 @@ export default function PlayersScreen() {
         <View style={styles.roundDot} />
         <Text style={styles.roundSub}>Live data</Text>
       </View>
-
-      {/* Footywire debug — remove once BE is confirmed working */}
-      {sortBy === 'ppts' ? (
-        <Text style={styles.fwDebug}>
-          {fwLoading ? 'BE: loading…' : fwError ? `BE error: ${String(fwError)}` : `BE: ${Object.keys(fwMap ?? {}).length} loaded | ${(fwMap as any)?.__debug ?? 'no debug'}`}
-        </Text>
-      ) : null}
 
       {/* Search */}
       <TextInput
@@ -243,7 +236,6 @@ const styles = StyleSheet.create({
   sortDirBtn: { borderColor: COLORS.border, minWidth: 36, alignItems: 'center' },
   sortDirLabel: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '700' },
   count: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
-  fwDebug: { fontSize: 11, color: COLORS.warning, marginBottom: 4 },
   list: { paddingBottom: 20 },
   filterRow: { flexDirection: 'row', alignItems: 'center' },
   ownedToggle: {
