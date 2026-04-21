@@ -41,8 +41,7 @@ export default function PlayerDetailScreen() {
   const breakdown = getScoreBreakdown(stats);
   const byeRound = byeMap?.[player.team?.name ?? ''];
 
-  const playerKey = footywireApi.normaliseName(`${player.first_name} ${player.last_name}`);
-  const fwPlayer = fwMap?.[playerKey];
+  const fwPlayer = fwMap ? footywireApi.lookupPlayer(fwMap, player.first_name, player.last_name) : undefined;
 
   const fwInjury = fwPlayer?.injuryStatus ?? null;
   const isSusp = fwInjury === 'SUS';

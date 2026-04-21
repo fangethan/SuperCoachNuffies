@@ -139,4 +139,26 @@ async function fetchBreakevenMap(): Promise<FootywireMap> {
   return merged;
 }
 
-export const footywireApi = { fetchBreakevenMap, normaliseName };
+// Look up a player by full name, falling back to last-name + first-initial if no exact match.
+// Handles nickname mismatches like "Cam Rayner" ↔ "Cameron Rayner".
+function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): FootywirePlayer | undefined {
+  const fullKey = normaliseName(`${firstName} ${lastName}`);
+  if (map[fullKey]) return map[fullKey];
+
+  // Fallback: last name + first initial
+  const lastNorm = normaliseName(lastName);
+  const firstInitial = normaliseName(firstName)[0];
+  if (!firstInitial || !lastNorm) return undefined;
+
+  for (const key of Object.keys(map)) {
+    const parts = key.split(' ');
+    if (parts.length < 2) continue;
+    const keyLast = parts[parts.length - 1];
+    const keyFirst = parts[0][0];
+    if (keyLast === lastNorm && keyFirst === firstInitial) return map[key];
+  }
+
+  return undefined;
+}
+
+export const footywireApi = { fetchBreakevenMap, normaliseName, lookupPlayer };

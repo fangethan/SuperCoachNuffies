@@ -15,7 +15,7 @@ export function usePlayers(year: number, round: number) {
 
 export function useFootywireBreakevens() {
   return useQuery({
-    queryKey: ['footywire', 'breakevens', 'v10'],
+    queryKey: ['footywire', 'breakevens', 'v11'],
     queryFn: () => footywireApi.fetchBreakevenMap(),
     staleTime: 1000 * 60 * 30, // 30 min cache
   });

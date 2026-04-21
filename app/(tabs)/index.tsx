@@ -61,8 +61,7 @@ export default function PlayersScreen() {
     if (!players || !fwMap) return {} as Record<number, number>;
     const map: Record<number, number> = {};
     for (const p of players) {
-      const key = footywireApi.normaliseName(`${p.first_name} ${p.last_name}`);
-      const fw = fwMap[key];
+      const fw = footywireApi.lookupPlayer(fwMap, p.first_name, p.last_name);
       if (fw !== undefined) map[p.id] = fw.breakeven;
     }
     return map;
@@ -72,8 +71,7 @@ export default function PlayersScreen() {
 
   // Memoised render for FlatList performance
   const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => {
-    const fwKey = footywireApi.normaliseName(`${item.first_name} ${item.last_name}`);
-    const fw = fwMap?.[fwKey];
+    const fw = fwMap ? footywireApi.lookupPlayer(fwMap, item.first_name, item.last_name) : undefined;
     return (
       <PlayerCard
         player={item}
