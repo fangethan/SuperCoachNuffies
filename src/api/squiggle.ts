@@ -24,13 +24,11 @@ async function fetchRound(year: number, round: number): Promise<SquiggleMatch[]>
   return data.games;
 }
 
-// Returns a map of teamName -> bye round number for the year
-async function fetchByeRounds(year: number): Promise<Record<string, number>> {
+// Returns a map of teamName -> all bye round numbers for the year
+async function fetchByeRounds(year: number): Promise<Record<string, number[]>> {
   const allGames = await fetchFixture(year);
-  // Regular season only (rounds 1-23, no finals)
-  const regularGames = allGames.filter(g => g.round <= 23 && !g.is_final);
+  const regularGames = allGames.filter(g => g.round >= 1 && g.round <= 23 && !g.is_final);
 
-  // Build set of rounds each team played in
   const teamRounds: Record<string, Set<number>> = {};
   regularGames.forEach(game => {
     if (!teamRounds[game.hteam]) teamRounds[game.hteam] = new Set();
@@ -39,16 +37,10 @@ async function fetchByeRounds(year: number): Promise<Record<string, number>> {
     teamRounds[game.ateam].add(game.round);
   });
 
-  // Find the round each team is missing (their bye)
-  const byeMap: Record<string, number> = {};
-  const allRounds = new Set(regularGames.map(g => g.round));
+  const allRounds = Array.from(new Set(regularGames.map(g => g.round))).sort((a, b) => a - b);
+  const byeMap: Record<string, number[]> = {};
   Object.entries(teamRounds).forEach(([team, rounds]) => {
-    for (const r of allRounds) {
-      if (!rounds.has(r)) {
-        byeMap[team] = r;
-        break;
-      }
-    }
+    byeMap[team] = allRounds.filter(r => !rounds.has(r));
   });
 
   return byeMap;

@@ -76,7 +76,7 @@ export default function PlayersScreen() {
       <PlayerCard
         player={item}
         rank={index + 1}
-        byeRound={byeMap?.[item.team?.name ?? '']}
+        byeRounds={byeMap?.[item.team?.name ?? '']}
         isOwned={myTeamIds.includes(item.id)}
         weeklyPriceChange={weeklyPriceMap[item.id]}
         fwInjuryStatus={fw?.injuryStatus ?? null}

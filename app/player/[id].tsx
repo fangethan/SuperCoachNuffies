@@ -39,7 +39,8 @@ export default function PlayerDetailScreen() {
   const isDPP = allPositions.length > 1;
   const priceDir = getPriceDirection(stats.price_change ?? 0);
   const breakdown = getScoreBreakdown(stats);
-  const byeRound = byeMap?.[player.team?.name ?? ''];
+  const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
+  const futureByeRounds = allByeRounds.filter(r => r > currentRound);
 
   const fwPlayer = fwMap ? footywireApi.lookupPlayer(fwMap, player.first_name, player.last_name) : undefined;
 
@@ -205,9 +206,13 @@ export default function PlayerDetailScreen() {
       </View>
 
       {/* Bye info */}
-      {byeRound ? (
+      {futureByeRounds.length > 0 ? (
         <View style={styles.byeBox}>
-          <Text style={styles.byeText}>Bye: Round {byeRound}</Text>
+          <Text style={styles.byeText}>
+            {futureByeRounds.length === 1
+              ? `Bye: Round ${futureByeRounds[0]}`
+              : `Byes: ${futureByeRounds.map(r => `Round ${r}`).join(' & ')}`}
+          </Text>
         </View>
       ) : null}
 

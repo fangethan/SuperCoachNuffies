@@ -98,7 +98,7 @@ export function getTradeInTargets(
 
 export function getTradeOutTargets(
   myTeam: Player[],
-  byeMap: Record<string, number>,
+  byeMap: Record<string, number[]>,
   currentRound: number
 ): TradeTarget[] {
   return myTeam
@@ -112,8 +112,9 @@ export function getTradeOutTargets(
       if (stats.price_change < 0) reasons.push(`Price falling ${(stats.price_change / 1000).toFixed(1)}k`);
       if (stats.ppts > stats.avg3) reasons.push(`BE ${stats.ppts} above avg`);
       if (player.injury_suspension_status) reasons.push(player.injury_suspension_status_text ?? 'Injured');
-      const byeRound = byeMap[player.team.name];
-      if (byeRound && byeRound === currentRound + 1) reasons.push(`Bye next round (R${byeRound})`);
+      const byeRounds = byeMap[player.team.name] ?? [];
+      const nextBye = byeRounds.find(r => r === currentRound + 1);
+      if (nextBye) reasons.push(`Bye next round (R${nextBye})`);
       return { player, stats, score, reasons };
     })
     .filter((x): x is TradeTarget => x !== null)

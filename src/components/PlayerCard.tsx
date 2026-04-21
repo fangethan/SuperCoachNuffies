@@ -8,7 +8,7 @@ import { useAppStore } from '../store/useAppStore';
 
 interface Props {
   player: Player;
-  byeRound?: number;
+  byeRounds?: number[];
   rank?: number;
   isOwned?: boolean;
   weeklyPriceChange?: number;
@@ -16,15 +16,14 @@ interface Props {
   fwBreakeven?: number;
 }
 
-export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isOwned, weeklyPriceChange, fwInjuryStatus, fwBreakeven }: Props) {
+export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, isOwned, weeklyPriceChange, fwInjuryStatus, fwBreakeven }: Props) {
   const router = useRouter();
   const sortBy = useAppStore(s => s.sortBy);
   const currentRound = useAppStore(s => s.currentRound);
   const stats = player.player_stats?.[0];
   const positions = player.positions?.map(p => p.position) ?? ['MID'];
 
-  // Only show a bye if it's in the future
-  const futureBye = byeRound && byeRound > currentRound ? byeRound : undefined;
+  const futureByeRounds = (byeRounds ?? []).filter(r => r > currentRound);
 
   // Dynamic stat shown on the right based on the active sort
   const { primaryValue, primaryLabel, primaryColor, secondaryValue } = (() => {
@@ -137,11 +136,11 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRound, rank, isO
             );
             return null;
           })()}
-          {futureBye ? (
-            <View style={styles.byeBadge}>
-              <Text style={styles.byeText}>BYE R{futureBye}</Text>
+          {futureByeRounds.map(r => (
+            <View key={r} style={styles.byeBadge}>
+              <Text style={styles.byeText}>BYE R{r}</Text>
             </View>
-          ) : null}
+          ))}
         </View>
       </View>
 
