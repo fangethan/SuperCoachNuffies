@@ -118,7 +118,7 @@ export default function PlayersScreen() {
       {/* Footywire debug — remove once BE is confirmed working */}
       {sortBy === 'ppts' ? (
         <Text style={styles.fwDebug}>
-          {fwLoading ? 'BE: loading…' : fwError ? `BE: error — ${String(fwError)}` : `BE: ${Object.keys(fwMap ?? {}).length} players loaded (check Metro logs for HTML sample)`}
+          {fwLoading ? 'BE: loading…' : fwError ? `BE error: ${String(fwError)}` : `BE: ${Object.keys(fwMap ?? {}).length} loaded | ${(fwMap as any)?.__debug ?? 'no debug'}`}
         </Text>
       ) : null}
 

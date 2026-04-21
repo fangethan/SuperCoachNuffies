@@ -2,6 +2,8 @@ export interface FootywirePlayer {
   breakeven: number;
   likelihood: number;
   injuryStatus: 'INJ' | 'SUS' | null;
+  injuryDetail: string | null;  // body part or null
+  returning: string | null;     // "1-2 weeks", "Round 8", "TBC", etc.
 }
 
 export type FootywireMap = Record<string, FootywirePlayer>;
@@ -52,54 +54,88 @@ function parseBreakevenPage(html: string): Record<string, { breakeven: number; l
   return result;
 }
 
-// Parse season page — full name in <a id="cellpid_XXXX">Full Name</a>
-// INJ/SUS in <span class="playerflag" title="Injured|Suspended">
-function parseSeasonPage(html: string): Record<string, 'INJ' | 'SUS'> {
-  const result: Record<string, 'INJ' | 'SUS'> = {};
+interface InjuryEntry {
+  status: 'INJ' | 'SUS';
+  detail: string;    // body part e.g. "Hamstring", or "Suspended"
+  returning: string; // e.g. "1-2 weeks", "Round 8", "TBC"
+}
+
+// Parse injury list page — /afl/footy/injury_list
+// Columns: Player | Injury (body part or "Suspended") | Returning
+function parseInjuryListPage(html: string): Record<string, InjuryEntry> {
+  const result: Record<string, InjuryEntry> = {};
   if (!html) return result;
 
-  const rows = html.split(/id="rowpid_\d+"/);
-  for (const row of rows) {
-    const nameMatch = row.match(/id="cellpid_\d+"[^>]*>([^<]+)<\/a>/i);
+  const rowRe = /<tr[^>]+class="(?:dark|light)color"[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null;
+
+  while ((rowMatch = rowRe.exec(html)) !== null) {
+    const row = rowMatch[1];
+
+    const nameMatch = row.match(/rel="nofollow"[^>]*>([^<]+)<\/a>/i);
     if (!nameMatch) continue;
+    const name = nameMatch[1].trim();
 
-    const flagMatch = row.match(/class="playerflag"[^>]+title="(Injured|Suspended)"/i);
-    if (!flagMatch) continue;
+    // Plain-text <td> cells only (player name cell has child tags so is skipped)
+    const cells: string[] = [];
+    const tdRe = /<td[^>]*>([^<]*)<\/td>/gi;
+    let tdMatch: RegExpExecArray | null;
+    while ((tdMatch = tdRe.exec(row)) !== null) {
+      cells.push(tdMatch[1].replace(/&nbsp;/g, '').trim());
+    }
 
-    result[normaliseName(nameMatch[1].trim())] = flagMatch[1] === 'Suspended' ? 'SUS' : 'INJ';
+    const detail = cells[0] ?? '';
+    const returning = cells[1] ?? '';
+    const status: 'INJ' | 'SUS' = detail === 'Suspended' ? 'SUS' : 'INJ';
+
+    result[normaliseName(name)] = { status, detail, returning };
   }
 
   return result;
 }
 
 async function fetchBreakevenMap(): Promise<FootywireMap> {
-  const beRes = await fetch('https://www.footywire.com/afl/footy/supercoach_breakevens', { headers: FW_HEADERS });
-  if (!beRes.ok) throw new Error(`Footywire BE fetch failed: ${beRes.status}`);
+  const injRes = await fetch('https://www.footywire.com/afl/footy/injury_list');
+  if (!injRes.ok) throw new Error(`INJ fetch failed: ${injRes.status}`);
+  const injHtml = String((await injRes.text()) || '');
+
+  const beRes = await fetch('https://www.footywire.com/afl/footy/supercoach_breakevens');
+  if (!beRes.ok) throw new Error(`BE fetch failed: ${beRes.status}`);
   const beHtml = String((await beRes.text()) || '');
 
-  const seasonRes = await fetch('https://www.footywire.com/afl/footy/supercoach_season', { headers: FW_HEADERS });
-  if (!seasonRes.ok) throw new Error(`Footywire season fetch failed: ${seasonRes.status}`);
-  const seasonHtml = String((await seasonRes.text()) || '');
-
   const beData = parseBreakevenPage(beHtml);
-  const injData = parseSeasonPage(seasonHtml);
+  const injData = parseInjuryListPage(injHtml);
+
+  const debugMsg = `inj:${injHtml.length}b/${Object.keys(injData).length}p be:${beHtml.length}b/${Object.keys(beData).length}p`;
+  console.log(`[Footywire] ${debugMsg}`);
 
   const merged: FootywireMap = {};
 
   for (const [key, be] of Object.entries(beData)) {
-    merged[key] = { ...be, injuryStatus: injData[key] ?? null };
+    const inj = injData[key];
+    merged[key] = {
+      ...be,
+      injuryStatus: inj?.status ?? null,
+      injuryDetail: inj?.detail ?? null,
+      returning: inj?.returning ?? null,
+    };
   }
 
-  for (const [key, status] of Object.entries(injData)) {
+  for (const [key, inj] of Object.entries(injData)) {
     if (!merged[key]) {
-      merged[key] = { breakeven: 0, likelihood: 0, injuryStatus: status };
+      merged[key] = {
+        breakeven: 0, likelihood: 0,
+        injuryStatus: inj.status,
+        injuryDetail: inj.detail,
+        returning: inj.returning,
+      };
     }
   }
 
   const hasRows = beHtml.includes('rowpid_');
   console.log(`[Footywire] beHtml length: ${beHtml.length}, hasRowpid: ${hasRows}, rows parsed: ${Object.keys(beData).length}`);
   if (!hasRows) console.log(`[Footywire] beHtml sample: ${beHtml.substring(0, 500)}`);
-  console.log(`[Footywire] Loaded ${Object.keys(merged).length} players, ${Object.values(injData).length} with INJ/SUS`);
+  (merged as any).__debug = debugMsg;
   return merged;
 }
 

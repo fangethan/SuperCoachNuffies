@@ -44,14 +44,12 @@ export default function PlayerDetailScreen() {
   const playerKey = footywireApi.normaliseName(`${player.first_name} ${player.last_name}`);
   const fwPlayer = fwMap?.[playerKey];
 
-  // Prefer footywire injury/suspension status, fall back to SC API
   const fwInjury = fwPlayer?.injuryStatus ?? null;
-  const scInjStatus = player.injury_suspension_status;
-  const scInjText = player.injury_suspension_status_text ?? scInjStatus ?? '';
-  const isSusp = fwInjury === 'SUS' || /susp/i.test(scInjText + (scInjStatus ?? ''));
-  const isInj = fwInjury === 'INJ' || (!fwInjury && !!scInjStatus && !isSusp);
+  const isSusp = fwInjury === 'SUS';
+  const isInj = fwInjury === 'INJ';
   const showInjBanner = isSusp || isInj;
-  const injBannerText = scInjText || (isSusp ? 'Suspended' : 'Injured');
+  const injuryDetail = fwPlayer?.injuryDetail ?? null;
+  const injuryReturning = fwPlayer?.returning ?? null;
 
   // Prefer footywire breakeven, fall back to SC API ppts
   const ppts = fwPlayer?.breakeven ?? stats.ppts ?? 0;
@@ -94,9 +92,15 @@ export default function PlayerDetailScreen() {
             <Text style={styles.injBannerLabel}>
               {isSusp ? 'SUSPENDED' : '✚  INJURED'}
             </Text>
-            <Text style={styles.injBannerText}>
-              {injBannerText}
-            </Text>
+            {injuryDetail && !isSusp ? (
+              <Text style={styles.injBannerText}>{injuryDetail}</Text>
+            ) : null}
+            {injuryReturning ? (
+              <View style={styles.injReturnRow}>
+                <Text style={styles.injReturnLabel}>Returns: </Text>
+                <Text style={styles.injReturnValue}>{injuryReturning}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </View>
@@ -298,9 +302,12 @@ const styles = StyleSheet.create({
   },
   injBannerLabel: {
     fontSize: 11, fontWeight: '800', color: COLORS.danger,
-    letterSpacing: 1, marginBottom: 3,
+    letterSpacing: 1, marginBottom: 4,
   },
-  injBannerText: { color: COLORS.danger, fontWeight: '500', fontSize: 13, textAlign: 'center' },
+  injBannerText: { color: COLORS.danger, fontWeight: '600', fontSize: 14, textAlign: 'center', marginBottom: 6 },
+  injReturnRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  injReturnLabel: { fontSize: 11, color: COLORS.textMuted, fontWeight: '500' },
+  injReturnValue: { fontSize: 11, color: COLORS.textSecondary, fontWeight: '700' },
   warn: { color: COLORS.warning },
   statsGrid: { flexDirection: 'row', marginBottom: 12 },
   priceRow: {
