@@ -18,7 +18,7 @@ export const COLORS = {
 
 export const POSITIONS = {
   DEF: { label: 'DEF', color: '#3b82f6', long: 'Defender' },
-  MID: { label: 'MID', color: '#a855f7', long: 'Midfielder' },
+  MID: { label: 'MID', color: '#ec4899', long: 'Midfielder' },
   FWD: { label: 'FWD', color: '#f97316', long: 'Forward' },
   RUC: { label: 'RUC', color: '#22c55e', long: 'Ruck' },
 };

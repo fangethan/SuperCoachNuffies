@@ -171,8 +171,8 @@ const styles = StyleSheet.create({
   },
   left: {
     alignItems: 'center',
-    marginRight: 10,
-    width: 44,
+    marginRight: 14,
+    width: 54,
   },
   rank: {
     fontSize: 11,
@@ -205,9 +205,9 @@ const styles = StyleSheet.create({
   },
   dppSlash: {
     fontSize: 10,
-    fontWeight: '400',
+    fontWeight: '300',
     color: COLORS.textMuted,
-    marginHorizontal: 1,
+    marginHorizontal: 2,
   },
   centre: {
     flex: 1,

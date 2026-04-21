@@ -14,8 +14,14 @@ export default function PlayerDetailScreen() {
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
 
+  const prevRound = Math.max(1, currentRound - 1);
+  const { data: prevPlayers } = usePlayers(CURRENT_YEAR, prevRound);
+
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
+  const prevPlayer = prevPlayers?.find(p => String(p.id) === id);
+  const prevStats = prevPlayer?.player_stats?.[0];
+  const lastRoundScore = (prevStats?.points ?? 0) > 0 ? String(prevStats!.points) : 'N/A';
 
   if (isLoading) {
     return (
@@ -37,7 +43,8 @@ export default function PlayerDetailScreen() {
   const pos = allPositions[0];
   const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
   const isDPP = allPositions.length > 1;
-  const priceDir = getPriceDirection(stats.price_change ?? 0);
+  const totalPriceChange = stats.total_price_change ?? stats.price_change ?? 0;
+  const priceDir = getPriceDirection(totalPriceChange);
   const breakdown = getScoreBreakdown(stats);
   const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
   const futureByeRounds = allByeRounds.filter(r => r > currentRound);
@@ -107,9 +114,9 @@ export default function PlayerDetailScreen() {
 
       {/* Key stats row */}
       <View style={styles.statsGrid}>
-        <StatBox label="This Round" value={String(stats.points ?? '-')} large />
+        <StatBox label="Last Round" value={lastRoundScore} large />
         <StatBox label="Season Avg" value={avg.toFixed(1)} large />
-        <StatBox label="L3 Avg" value={avg3.toFixed(1)} large highlight />
+        <StatBox label="L3 Avg" value={avg3.toFixed(1)} large />
         <StatBox label="L5 Avg" value={avg5.toFixed(1)} large />
       </View>
 
@@ -125,7 +132,7 @@ export default function PlayerDetailScreen() {
             styles.priceValue,
             priceDir === 'up' ? styles.up : priceDir === 'down' ? styles.down : styles.neutral,
           ]}>
-            {formatPriceChange(stats.price_change ?? 0)}
+            {totalPriceChange !== 0 ? formatPriceChange(totalPriceChange) : '-'}
           </Text>
         </View>
         <View style={styles.priceBox}>
@@ -199,7 +206,7 @@ export default function PlayerDetailScreen() {
           <View style={styles.matchupItem}>
             <Text style={styles.matchupLabel}>Venue Avg</Text>
             <Text style={styles.matchupValue}>
-              {venavg > 0 ? venavg.toFixed(0) : '-'}
+              {venavg > 0 ? venavg.toFixed(0) : 'N/A'}
             </Text>
           </View>
         </View>
