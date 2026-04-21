@@ -24,6 +24,12 @@ async function fetchRound(year: number, round: number): Promise<SquiggleMatch[]>
   return data.games;
 }
 
+// Squiggle uses different team names than the SuperCoach API for two clubs
+const SQUIGGLE_TO_SC: Record<string, string> = {
+  'Brisbane Lions': 'Brisbane',
+  'Greater Western Sydney': 'GWS Giants',
+};
+
 // Returns a map of teamName -> all bye round numbers for the year
 async function fetchByeRounds(year: number): Promise<Record<string, number[]>> {
   const allGames = await fetchFixture(year);
@@ -40,7 +46,8 @@ async function fetchByeRounds(year: number): Promise<Record<string, number[]>> {
   const allRounds = Array.from(new Set(regularGames.map(g => g.round))).sort((a, b) => a - b);
   const byeMap: Record<string, number[]> = {};
   Object.entries(teamRounds).forEach(([team, rounds]) => {
-    byeMap[team] = allRounds.filter(r => !rounds.has(r));
+    const scName = SQUIGGLE_TO_SC[team] ?? team;
+    byeMap[scName] = allRounds.filter(r => !rounds.has(r));
   });
 
   return byeMap;
