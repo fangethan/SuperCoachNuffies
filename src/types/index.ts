@@ -103,19 +103,19 @@ export interface PlayerStats {
   cbhs: number; total_cbhs: number;
 
   // Matchup
-  opp: Team;
+  opp: Team | null;
   oppavg: number;
   opph: number;
-  opp1: Team;   opp1h: number;
-  opp2: Team;   opp2h: number;
-  opp3: Team;   opp3h: number;
+  opp1: Team | null;   opp1h: number;
+  opp2: Team | null;   opp2h: number;
+  opp3: Team | null;   opp3h: number;
 
   // Venue
-  ven: Venue;
+  ven: Venue | null;
   venavg: number;
-  ven1: Venue;
-  ven2: Venue;
-  ven3: Venue;
+  ven1: Venue | null;
+  ven2: Venue | null;
+  ven3: Venue | null;
 
   // Live
   livepts: number;

@@ -33,8 +33,8 @@ function tradeInScore(player: Player, stats: PlayerStats): number {
   // Good matchup
   if (stats.oppavg > 75) score += 10;
 
-  // High TOG
-  if (stats.togp >= 75) score += 10;
+  // High TOG (skip when not available)
+  if (stats.togp > 0 && stats.togp >= 75) score += 10;
 
   // Not injured
   if (!player.injury_suspension_status) score += 10;
@@ -61,8 +61,8 @@ function tradeOutScore(player: Player, stats: PlayerStats): number {
   // Injured or suspended
   if (player.injury_suspension_status) score += 25;
 
-  // Very low TOG
-  if (stats.togp < 60 && stats.games > 0) score += 10;
+  // Very low TOG (skip when not available)
+  if (stats.togp > 0 && stats.togp < 60 && stats.games > 0) score += 10;
 
   return score;
 }

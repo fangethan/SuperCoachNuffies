@@ -30,17 +30,22 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
     if (!stats) return { primaryValue: '-', primaryLabel: 'avg', primaryColor: COLORS.textPrimary, secondaryValue: null };
     switch (sortBy) {
       case 'avg3':
-        return { primaryValue: stats.avg3?.toFixed(0) ?? '-', primaryLabel: 'L3 avg', primaryColor: COLORS.textPrimary };
-      case 'avg5':
-        return { primaryValue: stats.avg5?.toFixed(0) ?? '-', primaryLabel: 'L5 avg', primaryColor: COLORS.textPrimary };
-      case 'points': {
-        // Show round score if played, otherwise season total
-        const roundScore = stats.points ?? 0;
-        const seasonTotal = stats.total_points ?? 0;
-        const hasRoundScore = roundScore > 0;
         return {
-          primaryValue: hasRoundScore ? String(roundScore) : String(seasonTotal),
-          primaryLabel: hasRoundScore ? 'score' : 'total pts',
+          primaryValue: (stats.avg3 ?? 0) > 0 ? String(Math.round(stats.avg3!)) : 'N/A',
+          primaryLabel: 'L3 avg',
+          primaryColor: COLORS.textPrimary,
+        };
+      case 'avg5':
+        return {
+          primaryValue: (stats.avg5 ?? 0) > 0 ? String(Math.round(stats.avg5!)) : 'N/A',
+          primaryLabel: 'L5 avg',
+          primaryColor: COLORS.textPrimary,
+        };
+      case 'points': {
+        const roundScore = stats.points ?? 0;
+        return {
+          primaryValue: roundScore > 0 ? String(roundScore) : 'N/A',
+          primaryLabel: 'score',
           primaryColor: COLORS.textPrimary,
         };
       }
@@ -106,7 +111,7 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
         )}
       </View>
 
-      {/* Centre: name + team */}
+      {/* Centre: name + team + price */}
       <View style={styles.centre}>
         <View style={styles.nameRow}>
           <Text style={styles.name} numberOfLines={1}>
@@ -142,6 +147,26 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
             </View>
           ))}
         </View>
+        {stats ? (() => {
+          const price = stats.price ?? 0;
+          const total = stats.total_price_change ?? 0;
+          const weekly = weeklyPriceChange ?? stats.price_change ?? 0;
+          const totalDir = getPriceDirection(total);
+          const weeklyDir = getPriceDirection(weekly);
+          const totalCol = totalDir === 'up' ? COLORS.success : totalDir === 'down' ? COLORS.danger : COLORS.textMuted;
+          const weeklyCol = weeklyDir === 'up' ? COLORS.success : weeklyDir === 'down' ? COLORS.danger : COLORS.textMuted;
+          return (
+            <View style={styles.priceRow}>
+              <Text style={styles.priceText}>{formatPrice(price)}</Text>
+              {total !== 0 ? (
+                <Text style={[styles.priceChange, { color: totalCol }]}> {formatPriceChange(total)}</Text>
+              ) : null}
+              {weekly !== 0 ? (
+                <Text style={[styles.priceWeekly, { color: weeklyCol }]}> ({formatPriceChange(weekly)})</Text>
+              ) : null}
+            </View>
+          );
+        })() : null}
       </View>
 
       {/* Right: dynamic stat based on active sort */}
@@ -279,6 +304,25 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: COLORS.warning,
     fontWeight: '600',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+    flexWrap: 'nowrap',
+  },
+  priceText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  priceChange: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  priceWeekly: {
+    fontSize: 10,
+    fontWeight: '500',
   },
   right: {
     alignItems: 'flex-end',

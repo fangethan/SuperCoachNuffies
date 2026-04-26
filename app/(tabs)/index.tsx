@@ -46,16 +46,13 @@ export default function PlayersScreen() {
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
 
-  // Fetch previous round to get the most recently calculated price changes.
-  // Prices update after each round completes — current round always shows price_change=0.
-  const prevRound = Math.max(1, round - 1);
-  const { data: prevPlayers } = usePlayers(CURRENT_YEAR, prevRound);
+  // price_change on each player is already the last-round change from Footywire prices page
   const weeklyPriceMap = useMemo(() => {
-    if (!prevPlayers) return {} as Record<number, number>;
+    if (!players) return {} as Record<number, number>;
     return Object.fromEntries(
-      prevPlayers.map(p => [p.id, p.player_stats?.[0]?.price_change ?? 0])
+      players.map(p => [p.id, p.player_stats?.[0]?.price_change ?? 0])
     ) as Record<number, number>;
-  }, [prevPlayers]);
+  }, [players]);
 
   const fwBreakevenById = useMemo(() => {
     if (!players || !fwMap) return {} as Record<number, number>;
@@ -175,8 +172,8 @@ export default function PlayersScreen() {
         windowSize={10}
         removeClippedSubviews={true}
         getItemLayout={(_, index) => ({
-          length: 76,
-          offset: 76 * index,
+          length: 96,
+          offset: 96 * index,
           index,
         })}
       />

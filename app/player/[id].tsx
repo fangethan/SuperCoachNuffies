@@ -3,7 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-nat
 import { useLocalSearchParams } from 'expo-router';
 import { usePlayers, useByeRounds, useFootywireBreakevens } from '../../src/hooks/usePlayers';
 import { useAppStore } from '../../src/store/useAppStore';
-import { getScoreBreakdown, formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
+import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { footywireApi } from '../../src/api/footywire';
 
@@ -14,14 +14,10 @@ export default function PlayerDetailScreen() {
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
 
-  const prevRound = Math.max(1, currentRound - 1);
-  const { data: prevPlayers } = usePlayers(CURRENT_YEAR, prevRound);
-
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
-  const prevPlayer = prevPlayers?.find(p => String(p.id) === id);
-  const prevStats = prevPlayer?.player_stats?.[0];
-  const lastRoundScore = (prevStats?.points ?? 0) > 0 ? String(prevStats!.points) : 'N/A';
+  // points field now holds this round's score directly from Footywire
+  const lastRoundScore = (stats?.points ?? 0) > 0 ? String(stats!.points) : 'N/A';
 
   if (isLoading) {
     return (
@@ -45,7 +41,6 @@ export default function PlayerDetailScreen() {
   const isDPP = allPositions.length > 1;
   const totalPriceChange = stats.total_price_change ?? stats.price_change ?? 0;
   const priceDir = getPriceDirection(totalPriceChange);
-  const breakdown = getScoreBreakdown(stats);
   const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
   const futureByeRounds = allByeRounds.filter(r => r > currentRound);
 
@@ -116,8 +111,8 @@ export default function PlayerDetailScreen() {
       <View style={styles.statsGrid}>
         <StatBox label="Last Round" value={lastRoundScore} large />
         <StatBox label="Season Avg" value={avg.toFixed(1)} large />
-        <StatBox label="L3 Avg" value={avg3.toFixed(1)} large />
-        <StatBox label="L5 Avg" value={avg5.toFixed(1)} large />
+        <StatBox label="L3 Avg" value={avg3 > 0 ? avg3.toFixed(1) : 'N/A'} large />
+        <StatBox label="L5 Avg" value={avg5 > 0 ? avg5.toFixed(1) : 'N/A'} large />
       </View>
 
       {/* Price row */}
@@ -223,42 +218,17 @@ export default function PlayerDetailScreen() {
         </View>
       ) : null}
 
-      {/* Score breakdown */}
-      {stats.games > 0 && breakdown.length > 0 ? (
+      {/* Previous season — only show when data is available */}
+      {(player.previous_games ?? 0) > 0 ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Score Breakdown — Round {currentRound}</Text>
-          {breakdown.map(item => (
-            <View key={item.stat} style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel} numberOfLines={1}>{item.label}</Text>
-              <Text style={styles.breakdownCount}>{item.count}×</Text>
-              <View style={styles.breakdownBarTrack}>
-                <View
-                  style={[
-                    styles.breakdownBar,
-                    {
-                      width: `${Math.min(100, Math.abs(item.points) / Math.abs(breakdown[0].points) * 100)}%` as any,
-                      backgroundColor: item.points >= 0 ? COLORS.primary : COLORS.danger,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={[styles.breakdownPts, item.points >= 0 ? styles.up : styles.down]}>
-                {item.points > 0 ? '+' : ''}{item.points.toFixed(0)}
-              </Text>
-            </View>
-          ))}
+          <Text style={styles.sectionTitle}>Previous Season</Text>
+          <View style={styles.prevSeason}>
+            <StatBox label="Games" value={String(player.previous_games)} />
+            <StatBox label="Average" value={(player.previous_average ?? 0).toFixed(1)} highlight />
+            <StatBox label="Total" value={String(player.previous_total)} />
+          </View>
         </View>
       ) : null}
-
-      {/* Previous season */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Previous Season</Text>
-        <View style={styles.prevSeason}>
-          <StatBox label="Games" value={String(player.previous_games ?? 0)} />
-          <StatBox label="Average" value={(player.previous_average ?? 0).toFixed(1)} highlight />
-          <StatBox label="Total" value={String(player.previous_total ?? 0)} />
-        </View>
-      </View>
     </ScrollView>
   );
 }
@@ -348,12 +318,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.warning + '44',
   },
   byeText: { color: COLORS.warning, fontWeight: '700', fontSize: 14 },
-  breakdownRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  breakdownLabel: { width: 140, fontSize: 12, color: COLORS.textSecondary },
-  breakdownCount: { width: 28, fontSize: 11, color: COLORS.textMuted, textAlign: 'right', marginRight: 8 },
-  breakdownBarTrack: { flex: 1, height: 6, backgroundColor: COLORS.border, borderRadius: 3, overflow: 'hidden', marginRight: 8 },
-  breakdownBar: { height: '100%', borderRadius: 3 },
-  breakdownPts: { width: 36, fontSize: 12, fontWeight: '700', textAlign: 'right' },
   prevSeason: { flexDirection: 'row' },
 
   // Breakeven section

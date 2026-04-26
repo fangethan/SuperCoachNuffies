@@ -1,22 +1,10 @@
 import { Player } from '../types';
+import { footywireApi } from './footywire';
 
-const BASE_URL = 'https://www.supercoach.com.au';
-
+// All player data now sourced from Footywire.
+// This module is kept as a thin wrapper so call-sites don't need to change.
 async function fetchPlayers(year: number, round: number): Promise<Player[]> {
-  const url = `${BASE_URL}/${year}/api/afl/classic/v1/players-cf?embed=notes,odds,player_stats,positions&round=${round}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`SuperCoach API error: ${res.status}`);
-  return res.json();
+  return footywireApi.fetchAllPlayers(year, round);
 }
 
-// Fetch all rounds for a given year (for historical analysis)
-async function fetchAllRoundsForYear(year: number, totalRounds: number): Promise<Player[][]> {
-  const rounds = Array.from({ length: totalRounds }, (_, i) => i + 1);
-  const results = await Promise.all(rounds.map(r => fetchPlayers(year, r).catch(() => [])));
-  return results;
-}
-
-export const supercoachApi = {
-  fetchPlayers,
-  fetchAllRoundsForYear,
-};
+export const supercoachApi = { fetchPlayers };
