@@ -518,9 +518,91 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
   return players;
 }
 
-// ─── Background round scores fetcher ─────────────────────────────────────────
+// ─── Bulk round scores (supercoach_round page) ───────────────────────────────
 
 export interface PlayerRoundScores { avg5: number; lastScore: number; }
+
+// Parse supercoach_round?year=Y&round=R — returns all players' SC score for that round
+//
+// Confirmed column layout (from debug output):
+//   cells[0] = Rank  |  cells[1] = Name  |  cells[2] = Team
+//   cells[3] = Current price  |  cells[4] = Prev price
+//   cells[5] = Round score  |  cells[6] = Ownership %
+//
+// Top-ranked players may use a non-alternating CSS class, so we match ALL <tr>
+// instead of relying on splitRows (which only finds darkcolor/lightcolor rows).
+function parseRoundScoresPage(html: string): Record<string, number> {
+  const result: Record<string, number> = {};
+  if (!html) return result;
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = extractCells(m[1]);
+    if (cells.length < 7) continue;
+    // cells[0] is rank (a number) — skip rows where it isn't a small integer
+    const rank = parseInt(cells[0] ?? '', 10);
+    if (isNaN(rank) || rank < 1 || rank > 900) continue;
+    // Name is in cells[1]; strip any status suffix after newline (e.g. "James Sicily\n Suspended")
+    const name = (cells[1] ?? '').split('\n')[0].trim();
+    if (!name || name.length < 3) continue;
+    // Validate cells[3] is the current price (>100k) — guards against header/ad rows
+    const price = parseInt((cells[3] ?? '').replace(/[$,\s]/g, ''), 10);
+    if (isNaN(price) || price < 100_000) continue;
+    // Round score is in cells[5]
+    const scoreRaw = (cells[5] ?? '').trim();
+    if (!/^\d+$/.test(scoreRaw)) continue;
+    const score = parseInt(scoreRaw, 10);
+    if (score < 0 || score > 350) continue;
+    result[normaliseName(name)] = score;
+  }
+  console.log(`[FW round] parsed ${Object.keys(result).length} players`);
+  return result;
+}
+
+// Fetch ALL completed rounds in parallel (1 request per round, not 800 per player).
+// We need rounds 1..N because L5 = last 5 rounds a player actually played — a player
+// who DNP rounds 5-7 has their L5 in rounds 1-4, which we'd miss with a sliding window.
+async function fetchRoundScoresBulk(
+  year: number,
+  lastCompleteRound: number,
+  players: Player[],
+): Promise<Record<number, PlayerRoundScores>> {
+  // Start from round 0 (AFL opening round) — many players score there and it counts
+  // toward L5 and season avg. Players who didn't play round 0 simply won't appear on
+  // that page, so they're unaffected.
+  const rounds = Array.from({ length: lastCompleteRound + 1 }, (_, i) => i);
+
+  const roundHtmls = await Promise.all(
+    rounds.map(r =>
+      fetchWithRetry(`https://www.footywire.com/afl/footy/supercoach_round?year=${year}&round=${r}&p=&s=T`)
+    )
+  );
+
+  // Parse each round page into normName → score
+  const roundScoreMaps = roundHtmls.map(html => (html ? parseRoundScoresPage(html) : {}));
+
+  const output: Record<number, PlayerRoundScores> = {};
+  for (const player of players) {
+    const norm = normaliseName(`${player.first_name} ${player.last_name}`);
+    // Collect in most-recent-first order
+    const scores: number[] = [];
+    for (let i = roundScoreMaps.length - 1; i >= 0; i--) {
+      const score = roundScoreMaps[i][norm];
+      if (score !== undefined && score > 0) scores.push(score);
+    }
+    output[player.id] = {
+      lastScore: scores[0] ?? 0,
+      avg5: scores.length > 0
+        ? scores.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(scores.length, 5)
+        : 0,
+    };
+  }
+
+  console.log(`[FW bulk] rounds 0–${lastCompleteRound} → ${Object.keys(output).length} players`);
+  return output;
+}
+
+// ─── Legacy individual-page fetcher (kept for reference) ─────────────────────
 
 async function fetchAllPlayerRoundScores(year: number, players: Player[]): Promise<Record<number, PlayerRoundScores>> {
   // Step 1: get authoritative pu- slugs straight from the BE page (1 request).
@@ -598,4 +680,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchAllPlayerRoundScores, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, normaliseName, lookupPlayer };

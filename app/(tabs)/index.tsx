@@ -3,7 +3,8 @@ import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, usePlayerRoundScores } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { footywireApi } from '../../src/api/footywire';
 import { useCurrentRound } from '../../src/hooks/useCurrentRound';
 import { PlayerCard } from '../../src/components/PlayerCard';
@@ -64,8 +65,8 @@ export default function PlayersScreen() {
     return map;
   }, [players, fwMap]);
 
-  // Background query: fetch L5 avg and last round score for every player
-  const { data: roundScoresById = {}, isLoading: roundScoresLoading } = usePlayerRoundScores(CURRENT_YEAR, players ?? []);
+  // Round scores: fetches once per round, persisted on-device via AsyncStorage
+  const { data: roundScoresById, isLoading: roundScoresLoading } = useRoundScores(CURRENT_YEAR, round, players ?? []);
 
   const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading);
 

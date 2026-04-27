@@ -1,7 +1,8 @@
 import React, { Fragment } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, usePlayerRoundScores } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
@@ -13,7 +14,7 @@ export default function PlayerDetailScreen() {
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById = {} } = usePlayerRoundScores(CURRENT_YEAR, players ?? []);
+  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, currentRound, players ?? []);
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
