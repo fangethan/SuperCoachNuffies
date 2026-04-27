@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, usePlayerRoundScores } from '../../src/hooks/usePlayers';
 import { footywireApi } from '../../src/api/footywire';
 import { useCurrentRound } from '../../src/hooks/useCurrentRound';
 import { PlayerCard } from '../../src/components/PlayerCard';
@@ -64,7 +64,10 @@ export default function PlayersScreen() {
     return map;
   }, [players, fwMap]);
 
-  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById);
+  // Background query: fetch L5 avg and last round score for every player
+  const { data: roundScoresById = {}, isLoading: roundScoresLoading } = usePlayerRoundScores(CURRENT_YEAR, players ?? []);
+
+  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading);
 
   // Memoised render for FlatList performance
   const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => {
@@ -78,9 +81,10 @@ export default function PlayersScreen() {
         weeklyPriceChange={weeklyPriceMap[item.id]}
         fwInjuryStatus={fw?.injuryStatus ?? null}
         fwBreakeven={fw?.breakeven}
+        roundScores={roundScoresById[item.id]}
       />
     );
-  }, [byeMap, myTeamIds, weeklyPriceMap, fwMap]);
+  }, [byeMap, myTeamIds, weeklyPriceMap, fwMap, roundScoresById]);
 
   const keyExtractor = useCallback((item: Player) => String(item.id), []);
 
@@ -159,7 +163,9 @@ export default function PlayersScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.count}>{filtered.length} players</Text>
+      <Text style={styles.count}>
+        {filtered.length} players{roundScoresLoading && (sortBy === 'points' || sortBy === 'avg5') ? ' • loading scores…' : ''}
+      </Text>
 
       <FlatList
         data={filtered}

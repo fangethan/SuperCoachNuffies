@@ -96,10 +96,14 @@ function extractCells(row: string): string[] {
 }
 
 function extractPlayerName(row: string): string | null {
-  // 1. Full name in hiddenspan (breakeven-style pages)
-  const hidden = row.match(/class="hiddenspan"[^>]*>([^<]+)<\/span>/i);
-  if (hidden?.[1]?.trim()) return hidden[1].trim();
-  // 2. Player profile link text
+  // Match any class attribute that CONTAINS "hiddenspan" (handles extra classes like "hiddenspan hidden")
+  // Use [\s\S]*? so nested child elements don't block the match, then strip tags
+  const hidden = row.match(/class="[^"]*hiddenspan[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+  if (hidden?.[1]) {
+    const text = hidden[1].replace(/<[^>]+>/g, '').trim();
+    if (text) return text;
+  }
+  // Player profile link as fallback
   const link = row.match(/href="\/afl\/footy\/pu-[^"]*">([^<]+)<\/a>/i);
   if (link?.[1]?.trim()) return link[1].trim();
   return null;
@@ -141,9 +145,50 @@ interface BreakevenFullRow {
   price: number; games: number; avg: number;
   breakeven: number; likelihood: number;
 }
-interface ScoresRow  { avg3: number; avg5: number; roundScores: number[]; }
+
+// Footywire team URL slugs (used in pu-{team}--{player} URLs)
+const FW_TEAM_SLUG: Record<string, string> = {
+  'Adelaide':         'adelaide-crows',
+  'Brisbane':         'brisbane-lions',
+  'Carlton':          'carlton-blues',
+  'Collingwood':      'collingwood-magpies',
+  'Essendon':         'essendon-bombers',
+  'Fremantle':        'fremantle-dockers',
+  'Geelong':          'geelong-cats',
+  'Gold Coast':       'gold-coast-suns',
+  'GWS Giants':       'greater-western-sydney-giants',
+  'Hawthorn':         'hawthorn-hawks',
+  'Melbourne':        'melbourne-demons',
+  'North Melbourne':  'north-melbourne-kangaroos',
+  'Port Adelaide':    'port-adelaide-power',
+  'Richmond':         'richmond-tigers',
+  'St Kilda':         'st-kilda-saints',
+  'Sydney':           'sydney-swans',
+  'West Coast':       'west-coast-eagles',
+  'Western Bulldogs': 'western-bulldogs',
+};
+
+// Known name differences between Footywire's BE page and pu- URL format
+const FW_NAME_OVERRIDES: Record<string, string> = {
+  'zach merrett': 'zachary merrett',
+};
+
+function buildPlayerSlug(teamName: string, fullName: string): string {
+  const teamSlug = FW_TEAM_SLUG[teamName];
+  if (!teamSlug) return '';
+  const norm = fullName.toLowerCase();
+  const resolved = FW_NAME_OVERRIDES[norm] ?? norm;
+  const playerSlug = resolved
+    .replace(/['''`]/g, '')       // remove apostrophes
+    .replace(/[^a-z0-9\s-]/g, '') // remove other special chars (incl. periods)
+    .replace(/\b[a-z]\b/g, '')    // strip single-letter middle initials
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '-');
+  return `pu-${teamSlug}--${playerSlug}`;
+}
+interface ScoresRow  { avg3: number; }
 interface PricesRow  { price: number; totalChange: number; lastChange: number; }
-interface RoundRow   { roundScore: number; }
 
 // Detect price column by value > 100,000 — works whether or not $ prefix is present
 function findPriceIdx(cells: string[]): number {
@@ -186,55 +231,23 @@ function parseBreakevenFullPage(html: string): Record<string, BreakevenFullRow> 
   return result;
 }
 
+// Scores page columns (confirmed structure):
+// cells[0]=Name+"\n"+Pos | cells[1]=Team | cells[2]=Price | cells[3]=Games |
+// cells[4]=TotalPts | cells[5]=SeasonAvg | cells[6]=L3avg | ...
+// Rows split by darkcolor/lightcolor — NOT rowpid_ (that's in nav UI only)
 function parseScoresPage(html: string): Record<string, ScoresRow> {
   const result: Record<string, ScoresRow> = {};
-  const rows = splitRows(html);
+  const rows = html.split(/class="(?:dark|light)color"/);
   for (const row of rows) {
-    const name = extractPlayerName(row);
-    if (!name) continue;
     const cells = extractCells(row);
-    if (cells.length < 4) continue;
+    if (cells.length < 7) continue;
+    const name = cells[0]?.split('\n')[0]?.trim();
+    if (!name || name.length < 3) continue;
     const priceIdx = findPriceIdx(cells);
-    let avg3 = 0;
-    let avg5 = 0;
-    const roundScores: number[] = [];
-
-    if (priceIdx >= 0) {
-      // Try pre-calculated avg3 at priceIdx+3 or priceIdx+4 (page-dependent)
-      for (const offset of [3, 4, 2]) {
-        const v = parseFloat(cells[priceIdx + offset] ?? '');
-        if (!isNaN(v) && v >= 30 && v <= 220) { avg3 = v; break; }
-      }
-      // Extract individual round scores — pure integers 0-250 after the avg columns
-      const startIdx = priceIdx + 4;
-      for (let i = startIdx; i < cells.length; i++) {
-        const raw = cells[i].trim();
-        if (/^\d+$/.test(raw)) {
-          const v = parseInt(raw, 10);
-          if (v >= 0 && v <= 250) roundScores.push(v);
-        }
-      }
-    } else {
-      // No price found — collect all pure-integer cells as round scores
-      for (const cell of cells.slice(2)) {
-        const raw = cell.trim();
-        if (/^\d+$/.test(raw)) {
-          const v = parseInt(raw, 10);
-          if (v >= 0 && v <= 250) roundScores.push(v);
-        }
-      }
-    }
-
-    // Calculate from individual scores when pre-calculated values unavailable
-    const played = roundScores.filter(s => s > 0);
-    if (avg3 === 0 && played.length >= 3) {
-      avg3 = played.slice(-3).reduce((a, b) => a + b, 0) / 3;
-    }
-    if (played.length >= 5) {
-      avg5 = played.slice(-5).reduce((a, b) => a + b, 0) / 5;
-    }
-
-    result[normaliseName(name)] = { avg3, avg5, roundScores };
+    if (priceIdx < 0 || priceIdx + 4 >= cells.length) continue;
+    const avg3 = parseFloat(cells[priceIdx + 4] ?? '0');
+    if (isNaN(avg3) || avg3 <= 0) continue;
+    result[normaliseName(name)] = { avg3 };
   }
   console.log(`[FW scores] parsed ${Object.keys(result).length} players`);
   return result;
@@ -260,40 +273,33 @@ function parsePricesPage(html: string): Record<string, PricesRow> {
   return result;
 }
 
-function parseRoundPage(html: string): Record<string, RoundRow> {
-  const result: Record<string, RoundRow> = {};
-  const rows = splitRows(html);
-  for (const row of rows) {
-    const name = extractPlayerName(row);
-    if (!name) continue;
-    const cells = extractCells(row);
-    if (cells.length < 4) continue;
-    const priceIdx = findPriceIdx(cells);
-    let roundScore = 0;
-    if (priceIdx >= 0) {
-      // Scan 1-4 cells after price for an integer in AFL score range [0, 250]
-      for (let offset = 1; offset <= 4; offset++) {
-        const raw = (cells[priceIdx + offset] ?? '').trim();
-        // Must be a pure integer (no commas, no decimals) in range
-        if (/^\d+$/.test(raw)) {
-          const v = parseInt(raw, 10);
-          if (v >= 0 && v <= 250) { roundScore = v; break; }
-        }
-      }
-    } else {
-      // Fallback: scan cells[3..7] for a pure integer in AFL range
-      for (const idx of [5, 4, 6, 3]) {
-        const raw = (cells[idx] ?? '').trim();
-        if (/^\d+$/.test(raw)) {
-          const v = parseInt(raw, 10);
-          if (v >= 0 && v <= 250) { roundScore = v; break; }
-        }
-      }
+// Player profile page (pu-{team}--{player}?year=Y)
+// Table columns: Round | Price | SC Score | Value
+// Validates price > 100k to skip nav/header rows, then extracts scored rounds
+function parsePlayerRoundPage(html: string): Map<number, number> {
+  const scores = new Map<number, number>();
+  if (!html) return scores;
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  let seenRound1 = false;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = extractCells(m[1]);
+    if (cells.length < 3) continue;
+    const round = parseInt(cells[0], 10);
+    if (isNaN(round) || round < 1 || round > 30) continue;
+    const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
+    if (isNaN(price) || price < 100_000) continue;
+    // Round 1 appearing a second time means we've hit the previous year's section
+    if (round === 1) {
+      if (seenRound1) break;
+      seenRound1 = true;
     }
-    result[normaliseName(name)] = { roundScore };
+    const scoreStr = (cells[2] ?? '').trim();
+    if (!scoreStr || scoreStr === '--' || scoreStr === 'DNP') continue;
+    const score = parseInt(scoreStr, 10);
+    if (!isNaN(score) && score >= 0) scores.set(round, score);
   }
-  console.log(`[FW round] parsed ${Object.keys(result).length} players`);
-  return result;
+  return scores;
 }
 
 // ─── Injury / breakeven parsers (existing) ────────────────────────────────────
@@ -351,15 +357,21 @@ async function getText(url: string): Promise<string> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`FW fetch failed ${res.status}: ${url}`);
   const html = String((await res.text()) || '');
-  const hasRowpid     = html.includes('rowpid_');
-  const hasDarkColor  = html.includes('darkcolor');
-  const hasHiddenSpan = html.includes('hiddenspan');
-  const hasPuLink     = html.includes('/afl/footy/pu-');
-  const trCount       = (html.match(/<tr/gi) ?? []).length;
-  const tdCount       = (html.match(/<td/gi) ?? []).length;
-  console.log(`[FW fetch] ${url.split('/').pop()?.split('?')[0]} — ${html.length}b | rowpid:${hasRowpid} darkcolor:${hasDarkColor} hiddenspan:${hasHiddenSpan} pu-link:${hasPuLink} tr:${trCount} td:${tdCount}`);
-  console.log(`[FW sample] ${html.substring(0, 400)}`);
   return html;
+}
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+// Retry up to `attempts` times with exponential back-off (1 s, 2 s, …)
+async function fetchWithRetry(url: string, attempts = 3): Promise<string> {
+  for (let a = 0; a < attempts; a++) {
+    try {
+      return await getText(url);
+    } catch {
+      if (a < attempts - 1) await sleep(1000 * (a + 1));
+    }
+  }
+  return '';
 }
 
 // ─── Breakeven map (for existing usage in hooks) ──────────────────────────────
@@ -390,19 +402,17 @@ async function fetchBreakevenMap(): Promise<FootywireMap> {
 // ─── Main player aggregator ───────────────────────────────────────────────────
 
 async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
-  // Breakeven page is canonical: proven to parse all players with team/price/games/avg
-  const [beHtml, scoresHtml, pricesHtml, roundHtml, injHtml] = await Promise.all([
+  // Phase 1: aggregate pages (run in parallel)
+  const [beHtml, scoresHtml, pricesHtml, injHtml] = await Promise.all([
     getText(`https://www.footywire.com/afl/footy/supercoach_breakevens?year=${year}`),
     getText(`https://www.footywire.com/afl/footy/supercoach_scores?year=${year}`),
     getText(`https://www.footywire.com/afl/footy/supercoach_prices?year=${year}`),
-    getText(`https://www.footywire.com/afl/footy/supercoach_round?year=${year}&round=${round}`),
     getText('https://www.footywire.com/afl/footy/injury_list'),
   ]);
 
-  const beData     = parseBreakevenFullPage(beHtml);   // canonical — 789 players
+  const beData     = parseBreakevenFullPage(beHtml);
   const scoresData = parseScoresPage(scoresHtml);
   const pricesData = parsePricesPage(pricesHtml);
-  const roundData  = parseRoundPage(roundHtml);
   const injData    = parseInjuryListPage(injHtml);
 
   const players: Player[] = [];
@@ -410,7 +420,6 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
   for (const [normName, be] of Object.entries(beData)) {
     const scores = scoresData[normName];
     const prices = pricesData[normName];
-    const rd     = roundData[normName];
     const inj    = injData[normName];
 
     const { firstName, lastName } = splitName(
@@ -420,9 +429,9 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
     const team = resolveTeam(be.teamRaw);
     const id   = stableId(normName);
 
-    // Last-round score: prefer round page, fall back to most recent individual score
-    const played = (scores?.roundScores ?? []).filter(s => s > 0);
-    const lastScore = rd?.roundScore ?? (played.length > 0 ? played[played.length - 1] : 0);
+    const avg3 = scores?.avg3 ?? 0;
+    const lastScore = 0;
+    const avg5 = 0;
 
     const stats: PlayerStats = {
       player_id: id,
@@ -434,8 +443,8 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
       price_change:       prices?.lastChange  ?? 0,
       total_price_change: prices?.totalChange ?? 0,
       avg:                be.avg,
-      avg3:               scores?.avg3        ?? 0,
-      avg5:               scores?.avg5        ?? 0,
+      avg3,
+      avg5,
       ppts:               be.breakeven,
       ppts1:              0,
       owned:              0,
@@ -509,6 +518,66 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
   return players;
 }
 
+// ─── Background round scores fetcher ─────────────────────────────────────────
+
+export interface PlayerRoundScores { avg5: number; lastScore: number; }
+
+async function fetchAllPlayerRoundScores(year: number, players: Player[]): Promise<Record<number, PlayerRoundScores>> {
+  // Step 1: get authoritative pu- slugs straight from the BE page (1 request).
+  // Each row already has href="pu-team--player" — no slug building, no guessing.
+  const slugByNorm = new Map<string, string>();
+  try {
+    const beHtml = await getText(`https://www.footywire.com/afl/footy/supercoach_breakevens?year=${year}`);
+    for (const row of beHtml.split(/id="rowpid_\d+"/)) {
+      const nameMatch = row.match(/class="hiddenspan"[^>]*>([^<]+)<\/span>/i);
+      const slugMatch = row.match(/href="(pu-[^"]+)"/i);
+      if (nameMatch?.[1] && slugMatch?.[1]) {
+        slugByNorm.set(normaliseName(nameMatch[1].trim()), slugMatch[1].trim());
+      }
+    }
+  } catch { /* fall through — will use buildPlayerSlug fallback below */ }
+
+  // Step 2: map every player to its slug (BE page slug wins; built slug is fallback)
+  const slugEntries = players
+    .map(p => {
+      const norm = normaliseName(`${p.first_name} ${p.last_name}`);
+      const slug = slugByNorm.get(norm)
+        ?? buildPlayerSlug(p.team.name, `${p.first_name} ${p.last_name}`);
+      return { id: p.id, slug };
+    })
+    .filter(e => e.slug.length > 0);
+
+  // Step 3: fetch individual player pages — 25 concurrent at a time.
+  // No inter-batch delay needed (25 concurrent is well within Footywire's limits);
+  // the retry logic handles any transient rejections.
+  const BATCH = 25;
+  const roundMaps: Map<number, number>[] = new Array(slugEntries.length);
+  for (let i = 0; i < slugEntries.length; i += BATCH) {
+    const batch = slugEntries.slice(i, i + BATCH);
+    const batchResults = await Promise.allSettled(
+      batch.map(({ slug }) =>
+        fetchWithRetry(`https://www.footywire.com/afl/footy/${slug}?year=${year}`)
+          .then(html => html ? parsePlayerRoundPage(html) : new Map<number, number>())
+          .catch(() => new Map<number, number>())
+      )
+    );
+    batchResults.forEach((r, j) => {
+      roundMaps[i + j] = r.status === 'fulfilled' ? r.value : new Map();
+    });
+  }
+
+  const output: Record<number, PlayerRoundScores> = {};
+  slugEntries.forEach(({ id }, i) => {
+    const roundMap = roundMaps[i] ?? new Map<number, number>();
+    const sorted = Array.from(roundMap.entries()).sort(([a], [b]) => b - a).map(([, s]) => s);
+    output[id] = {
+      lastScore: sorted[0] ?? 0,
+      avg5: sorted.length > 0 ? sorted.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(sorted.length, 5) : 0,
+    };
+  });
+  return output;
+}
+
 // ─── Lookup helpers ───────────────────────────────────────────────────────────
 
 function lookupByNorm(map: FootywireMap, normName: string): FootywirePlayer | undefined {
@@ -529,4 +598,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchAllPlayerRoundScores, normaliseName, lookupPlayer };

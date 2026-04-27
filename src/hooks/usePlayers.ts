@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
-import { footywireApi } from '../api/footywire';
+import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
 export function usePlayers(year: number, round: number) {
   return useQuery({
-    queryKey: ['players', year, round],
+    queryKey: ['players', 'v9', year, round],
     queryFn: () => supercoachApi.fetchPlayers(year, round),
     staleTime: 1000 * 60 * 30, // 30 min cache
   });
@@ -26,6 +26,15 @@ export function useByeRounds(year: number) {
     queryKey: ['byes', year],
     queryFn: () => squiggleApi.fetchByeRounds(year),
     staleTime: 1000 * 60 * 60 * 24, // 24h cache — byes don't change
+  });
+}
+
+export function usePlayerRoundScores(year: number, players: Player[]) {
+  return useQuery({
+    queryKey: ['player-round-scores', 'v3', year],
+    queryFn: () => footywireApi.fetchAllPlayerRoundScores(year, players),
+    enabled: players.length > 0,
+    staleTime: 1000 * 60 * 30,
   });
 }
 
@@ -51,6 +60,8 @@ export function useFilteredPlayers(
   players: Player[],
   weeklyPriceMap: Record<number, number> = {},
   fwBreakevenById: Record<number, number> = {},
+  roundScoresById: Record<number, PlayerRoundScores> = {},
+  roundScoresLoading = false,
 ) {
   const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, myTeamIds } = useAppStore();
 
@@ -74,6 +85,21 @@ export function useFilteredPlayers(
     );
   }
 
+  // Only filter by score data once the background query has finished loading.
+  // While loading, show all players so the list is never empty.
+  if (!roundScoresLoading) {
+    if (sortBy === 'avg3') {
+      filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
+    } else if (sortBy === 'avg5') {
+      filtered = filtered.filter(p => (roundScoresById[p.id]?.avg5 ?? 0) > 0);
+    } else if (sortBy === 'points') {
+      filtered = filtered.filter(p => (roundScoresById[p.id]?.lastScore ?? 0) > 0);
+    }
+  } else if (sortBy === 'avg3') {
+    // L3 comes from the bulk page — always available immediately
+    filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
+  }
+
   filtered = [...filtered].sort((a, b) => {
     const sa = a.player_stats?.[0];
     const sb = b.player_stats?.[0];
@@ -82,18 +108,23 @@ export function useFilteredPlayers(
     switch (sortBy) {
       case 'avg':    diff = (sb.avg ?? 0) - (sa.avg ?? 0); break;
       case 'avg3':   diff = (sb.avg3 ?? 0) - (sa.avg3 ?? 0); break;
-      case 'avg5':   diff = (sb.avg5 ?? 0) - (sa.avg5 ?? 0); break;
+      case 'avg5': {
+        const a5 = roundScoresById[a.id]?.avg5 ?? 0;
+        const b5 = roundScoresById[b.id]?.avg5 ?? 0;
+        diff = b5 - a5;
+        break;
+      }
       case 'price':  diff = (sb.price ?? 0) - (sa.price ?? 0); break;
       case 'price_change': {
-        // Use previous round's price_change (most recently calculated weekly change)
         const aChange = weeklyPriceMap[a.id] ?? sa.price_change ?? 0;
         const bChange = weeklyPriceMap[b.id] ?? sb.price_change ?? 0;
         diff = bChange - aChange;
         break;
       }
       case 'points': {
-        const d = (sb.points ?? 0) - (sa.points ?? 0);
-        diff = d !== 0 ? d : (sb.total_points ?? 0) - (sa.total_points ?? 0);
+        const aScore = roundScoresById[a.id]?.lastScore ?? 0;
+        const bScore = roundScoresById[b.id]?.lastScore ?? 0;
+        diff = bScore - aScore;
         break;
       }
       case 'owned':  diff = (sb.owned ?? 0) - (sa.owned ?? 0); break;
@@ -101,9 +132,9 @@ export function useFilteredPlayers(
         const abe = fwBreakevenById[a.id] ?? sa.ppts ?? null;
         const bbe = fwBreakevenById[b.id] ?? sb.ppts ?? null;
         if (abe === null && bbe === null) { diff = 0; break; }
-        if (abe === null) { diff = 1; break; }  // push nulls to bottom
+        if (abe === null) { diff = 1; break; }
         if (bbe === null) { diff = -1; break; }
-        diff = bbe - abe; // high BE first by default
+        diff = bbe - abe;
         break;
       }
       default: diff = 0;

@@ -1,7 +1,7 @@
 import React, { Fragment } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, usePlayerRoundScores } from '../../src/hooks/usePlayers';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
@@ -13,11 +13,13 @@ export default function PlayerDetailScreen() {
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
+  const { data: roundScoresById = {} } = usePlayerRoundScores(CURRENT_YEAR, players ?? []);
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
-  // points field now holds this round's score directly from Footywire
-  const lastRoundScore = (stats?.points ?? 0) > 0 ? String(stats!.points) : 'N/A';
+  const playerId = player ? player.id : 0;
+  const roundScores = roundScoresById[playerId];
+  const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
 
   if (isLoading) {
     return (
@@ -62,7 +64,7 @@ export default function PlayerDetailScreen() {
   const oppavg = stats.oppavg ?? 0;
   const venavg = stats.venavg ?? 0;
   const avg = stats.avg ?? 0;
-  const avg5 = stats.avg5 ?? 0;
+  const avg5 = roundScores?.avg5 ?? 0;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>

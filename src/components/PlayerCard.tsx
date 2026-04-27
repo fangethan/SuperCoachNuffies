@@ -14,9 +14,10 @@ interface Props {
   weeklyPriceChange?: number;
   fwInjuryStatus?: 'INJ' | 'SUS' | null;
   fwBreakeven?: number;
+  roundScores?: { avg5: number; lastScore: number };
 }
 
-export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, isOwned, weeklyPriceChange, fwInjuryStatus, fwBreakeven }: Props) {
+export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, isOwned, weeklyPriceChange, fwInjuryStatus, fwBreakeven, roundScores }: Props) {
   const router = useRouter();
   const sortBy = useAppStore(s => s.sortBy);
   const currentRound = useAppStore(s => s.currentRound);
@@ -31,18 +32,20 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
     switch (sortBy) {
       case 'avg3':
         return {
-          primaryValue: (stats.avg3 ?? 0) > 0 ? String(Math.round(stats.avg3!)) : 'N/A',
+          primaryValue: (stats.avg3 ?? 0) > 0 ? stats.avg3!.toFixed(1) : 'N/A',
           primaryLabel: 'L3 avg',
           primaryColor: COLORS.textPrimary,
         };
-      case 'avg5':
+      case 'avg5': {
+        const a5 = roundScores?.avg5 ?? 0;
         return {
-          primaryValue: (stats.avg5 ?? 0) > 0 ? String(Math.round(stats.avg5!)) : 'N/A',
+          primaryValue: a5 > 0 ? a5.toFixed(1) : 'N/A',
           primaryLabel: 'L5 avg',
           primaryColor: COLORS.textPrimary,
         };
+      }
       case 'points': {
-        const roundScore = stats.points ?? 0;
+        const roundScore = roundScores?.lastScore ?? 0;
         return {
           primaryValue: roundScore > 0 ? String(roundScore) : 'N/A',
           primaryLabel: 'score',
