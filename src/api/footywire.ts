@@ -110,8 +110,13 @@ function extractPlayerName(row: string): string | null {
 }
 
 function extractPositions(row: string): Position[] {
+  // Footywire uses "FOR" for forwards on the scores page; map it to internal 'FWD'
   const found = [...new Set(
-    [...row.matchAll(/\b(DEF|MID|FWD|RUC)\b/g)].map(m => m[1] as 'DEF' | 'MID' | 'FWD' | 'RUC')
+    [...row.matchAll(/\b(DEF|MID|FWD|FOR|RUC)\b/gi)]
+      .map(m => {
+        const p = m[1].toUpperCase();
+        return (p === 'FOR' ? 'FWD' : p) as 'DEF' | 'MID' | 'FWD' | 'RUC';
+      })
   )];
   if (found.length === 0) found.push('MID');
   const LONG: Record<string, string> = { DEF: 'Defender', MID: 'Midfielder', FWD: 'Forward', RUC: 'Ruck' };
@@ -187,7 +192,7 @@ function buildPlayerSlug(teamName: string, fullName: string): string {
     .replace(/\s+/g, '-');
   return `pu-${teamSlug}--${playerSlug}`;
 }
-interface ScoresRow  { avg3: number; }
+interface ScoresRow  { avg3: number; positions: Position[]; }
 interface PricesRow  { price: number; totalChange: number; lastChange: number; }
 
 // Detect price column by value > 100,000 — works whether or not $ prefix is present
@@ -235,19 +240,27 @@ function parseBreakevenFullPage(html: string): Record<string, BreakevenFullRow> 
 // cells[0]=Name+"\n"+Pos | cells[1]=Team | cells[2]=Price | cells[3]=Games |
 // cells[4]=TotalPts | cells[5]=SeasonAvg | cells[6]=L3avg | ...
 // Rows split by darkcolor/lightcolor — NOT rowpid_ (that's in nav UI only)
+// cells[0] = "Name\nPos" (position abbreviation on the second line)
 function parseScoresPage(html: string): Record<string, ScoresRow> {
   const result: Record<string, ScoresRow> = {};
   const rows = html.split(/class="(?:dark|light)color"/);
   for (const row of rows) {
     const cells = extractCells(row);
     if (cells.length < 7) continue;
-    const name = cells[0]?.split('\n')[0]?.trim();
+    const parts = (cells[0] ?? '').split('\n');
+    const name = parts[0]?.trim();
     if (!name || name.length < 3) continue;
     const priceIdx = findPriceIdx(cells);
     if (priceIdx < 0 || priceIdx + 4 >= cells.length) continue;
     const avg3 = parseFloat(cells[priceIdx + 4] ?? '0');
     if (isNaN(avg3) || avg3 <= 0) continue;
-    result[normaliseName(name)] = { avg3 };
+    // Position is on the second line of the name cell, e.g. "FWD" or "MID/FWD"
+    const posText = (parts[1] ?? '').trim();
+    const positions = extractPositions(posText || row);
+    if (Object.keys(result).length < 5) {
+      console.log(`[FW pos DEBUG] name="${name}" posText="${posText}" cells[0]=${JSON.stringify(cells[0]?.slice(0, 60))}`);
+    }
+    result[normaliseName(name)] = { avg3, positions };
   }
   console.log(`[FW scores] parsed ${Object.keys(result).length} players`);
   return result;
@@ -505,7 +518,7 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
       previous_average: 0,
       previous_total:   0,
       team,
-      positions:    be.positions,
+      positions:    scores?.positions ?? be.positions,
       player_stats: [stats],
       notes: [],
       odds:  [],

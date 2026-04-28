@@ -7,7 +7,7 @@ import { useAppStore } from '../store/useAppStore';
 
 export function usePlayers(year: number, round: number) {
   return useQuery({
-    queryKey: ['players', 'v9', year, round],
+    queryKey: ['players', 'v11', year, round],
     queryFn: () => supercoachApi.fetchPlayers(year, round),
     staleTime: 1000 * 60 * 30, // 30 min cache
   });
