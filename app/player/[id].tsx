@@ -1,12 +1,12 @@
-import React, { Fragment } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { Fragment, useState } from 'react';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
-import { footywireApi } from '../../src/api/footywire';
+import { footywireApi, MatchEntry } from '../../src/api/footywire';
 
 export default function PlayerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -15,6 +15,8 @@ export default function PlayerDetailScreen() {
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
   const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, currentRound, players ?? []);
+  const { data: matchList } = useMatchList(CURRENT_YEAR);
+  const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
@@ -66,6 +68,17 @@ export default function PlayerDetailScreen() {
   const venavg = stats.venavg ?? 0;
   const avg = stats.avg ?? 0;
   const avg5 = roundScores?.avg5 ?? 0;
+
+  const perRoundScores = roundScores?.roundScores ?? {};
+  const teamMatches = matchList?.filter(
+    m => m.homeTeam === player.team.name || m.awayTeam === player.team.name
+  ) ?? [];
+  const history = [...teamMatches]
+    .filter(m => m.homeScore !== null)
+    .sort((a, b) => b.round - a.round);
+  const fixtures = [...teamMatches]
+    .filter(m => m.homeScore === null)
+    .sort((a, b) => a.round - b.round);
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -221,6 +234,89 @@ export default function PlayerDetailScreen() {
         </View>
       ) : null}
 
+      {/* History / Fixtures */}
+      <View style={styles.section}>
+        {/* Tab toggle */}
+        <View style={hfStyles.tabRow}>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[hfStyles.tabBtn, activeTab === 'history' && hfStyles.tabBtnActive]}
+            onPress={() => setActiveTab('history')}
+          >
+            <Text style={[hfStyles.tabLabel, activeTab === 'history' && hfStyles.tabLabelActive]}>History</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[hfStyles.tabBtn, activeTab === 'fixtures' && hfStyles.tabBtnActive]}
+            onPress={() => setActiveTab('fixtures')}
+          >
+            <Text style={[hfStyles.tabLabel, activeTab === 'fixtures' && hfStyles.tabLabelActive]}>Fixtures</Text>
+          </TouchableOpacity>
+        </View>
+
+        {activeTab === 'history' && (
+          <>
+            <View style={hfStyles.headerRow}>
+              <Text style={[hfStyles.headerCell, { width: 38 }]}>Rnd</Text>
+              <Text style={[hfStyles.headerCell, { width: 82 }]}>Opponent</Text>
+              <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
+              <Text style={[hfStyles.headerCell, { width: 80 }]}>Result</Text>
+              <Text style={[hfStyles.headerCell, { width: 32 }]}>SC</Text>
+            </View>
+            {history.length === 0 ? (
+              <Text style={hfStyles.empty}>No completed games yet</Text>
+            ) : history.map(m => {
+              const isHome = m.homeTeam === player.team.name;
+              const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
+              const myScore  = isHome ? m.homeScore! : m.awayScore!;
+              const oppScore = isHome ? m.awayScore! : m.homeScore!;
+              const result   = myScore > oppScore ? 'W' : myScore < oppScore ? 'L' : 'D';
+              const sc       = perRoundScores[m.round] ?? 0;
+              return (
+                <View key={m.round} style={hfStyles.row}>
+                  <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
+                  <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{m.venue}</Text>
+                  <View style={{ width: 80, alignItems: 'center' }}>
+                    <View style={[hfStyles.pill,
+                      result === 'W' ? hfStyles.pillWin : result === 'L' ? hfStyles.pillLoss : hfStyles.pillDraw,
+                    ]}>
+                      <Text style={hfStyles.pillText}>{myScore}-{oppScore}</Text>
+                    </View>
+                  </View>
+                  <Text style={[hfStyles.cell, { width: 32, textAlign: 'center' }]}>
+                    {sc > 0 ? sc : '-'}
+                  </Text>
+                </View>
+              );
+            })}
+          </>
+        )}
+
+        {activeTab === 'fixtures' && (
+          <>
+            <View style={hfStyles.headerRow}>
+              <Text style={[hfStyles.headerCell, { width: 38 }]}>Rnd</Text>
+              <Text style={[hfStyles.headerCell, { width: 82 }]}>Opponent</Text>
+              <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
+            </View>
+            {fixtures.length === 0 ? (
+              <Text style={hfStyles.empty}>No remaining fixtures</Text>
+            ) : fixtures.map(m => {
+              const isHome   = m.homeTeam === player.team.name;
+              const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
+              return (
+                <View key={m.round} style={hfStyles.row}>
+                  <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
+                  <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{m.venue}</Text>
+                </View>
+              );
+            })}
+          </>
+        )}
+      </View>
+
       {/* Previous season — only show when data is available */}
       {(player.previous_games ?? 0) > 0 ? (
         <View style={styles.section}>
@@ -344,4 +440,48 @@ const styles = StyleSheet.create({
   bePillWarning: { backgroundColor: COLORS.warning + '22' },
   bePillDanger: { backgroundColor: COLORS.danger + '22' },
   bePillText: { fontSize: 11, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: 0.5 },
+});
+
+const hfStyles = StyleSheet.create({
+  tabRow: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surfaceAlt,
+    borderRadius: 8,
+    padding: 3,
+    marginBottom: 12,
+  },
+  tabBtn: {
+    flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 6,
+  },
+  tabBtnActive: { backgroundColor: COLORS.surface },
+  tabLabel: { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  tabLabelActive: { fontSize: 13, fontWeight: '700', color: COLORS.textPrimary },
+  headerRow: {
+    flexDirection: 'row',
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+    marginBottom: 2,
+  },
+  headerCell: {
+    fontSize: 10, fontWeight: '700', textAlign: 'center',
+    color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.5,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border + '55',
+  },
+  cell: { fontSize: 13, color: COLORS.textPrimary },
+  pill: {
+    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4,
+    alignItems: 'center', justifyContent: 'center', minWidth: 64,
+  },
+  pillWin:  { backgroundColor: COLORS.success + '33', borderWidth: 1, borderColor: COLORS.success },
+  pillLoss: { backgroundColor: COLORS.danger  + '33', borderWidth: 1, borderColor: COLORS.danger  },
+  pillDraw: { backgroundColor: '#1e3a5f',              borderWidth: 1, borderColor: '#4a7fa5'      },
+  pillText: { fontSize: 11, fontWeight: '800', color: COLORS.textPrimary },
+  empty: { fontSize: 13, color: COLORS.textMuted, paddingTop: 12, textAlign: 'center' },
 });

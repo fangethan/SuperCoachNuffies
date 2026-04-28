@@ -533,7 +533,98 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
 
 // ─── Bulk round scores (supercoach_round page) ───────────────────────────────
 
-export interface PlayerRoundScores { avg5: number; lastScore: number; }
+export interface PlayerRoundScores {
+  avg5: number;
+  lastScore: number;
+  roundScores: Record<number, number>; // round index → SC score (0 = DNP / not on page)
+}
+
+// ─── Match list ───────────────────────────────────────────────────────────────
+
+export interface MatchEntry {
+  round: number;
+  homeTeam: string;    // canonical name
+  homeAbbrev: string;
+  awayTeam: string;    // canonical name
+  awayAbbrev: string;
+  venue: string;
+  date: string;
+  homeScore: number | null;
+  awayScore: number | null;
+}
+
+function parseMatchListPage(html: string): MatchEntry[] {
+  const entries: MatchEntry[] = [];
+  if (!html) return entries;
+
+  const roundAnchorRe = /(?:name|id)="round_(\d+)"/gi;
+  const roundPositions: Array<{ round: number; pos: number }> = [];
+  let anchorMatch: RegExpExecArray | null;
+  while ((anchorMatch = roundAnchorRe.exec(html)) !== null) {
+    roundPositions.push({ round: parseInt(anchorMatch[1], 10), pos: anchorMatch.index });
+  }
+
+  for (let i = 0; i < roundPositions.length; i++) {
+    const { round, pos } = roundPositions[i];
+    const end = i + 1 < roundPositions.length ? roundPositions[i + 1].pos : html.length;
+    const section = html.slice(pos, end);
+
+    const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    let rowMatch: RegExpExecArray | null;
+    while ((rowMatch = rowRe.exec(section)) !== null) {
+      // Normalise: collapse newlines/tabs into spaces so "Sydney\nv \nCarlton" → "Sydney v Carlton"
+      const cells = extractCells(rowMatch[1]).map(c => c.replace(/\s+/g, ' ').trim());
+      if (cells.length < 3) continue;
+
+      // Identify the match cell — contains " v " after normalisation
+      const matchIdx = cells.findIndex(c => c.includes(' v '));
+      if (matchIdx < 0) continue;
+
+      const matchText = cells[matchIdx];
+      const vIdx = matchText.indexOf(' v ');
+      const homeTeamRaw = matchText.slice(0, vIdx).trim();
+      const awayTeamRaw = matchText.slice(vIdx + 3).trim();
+      if (!homeTeamRaw || !awayTeamRaw) continue;
+
+      const homeResolved = resolveTeam(homeTeamRaw);
+      const awayResolved = resolveTeam(awayTeamRaw);
+      // id=0 means unrecognised team — skips header row ("Home v Away Teams") and BYE rows
+      if (homeResolved.id === 0 || awayResolved.id === 0) continue;
+
+      const venue = cells[matchIdx + 1]?.trim() ?? '';
+
+      // Result: "NNN-NNN" pattern; absent for unplayed matches
+      const resultCell = cells.find(c => /^\d+-\d+$/.test(c)) ?? null;
+      let homeScore: number | null = null;
+      let awayScore: number | null = null;
+      if (resultCell) {
+        const [h, a] = resultCell.split('-');
+        homeScore = parseInt(h, 10);
+        awayScore = parseInt(a, 10);
+      }
+
+      entries.push({
+        round,
+        homeTeam: homeResolved.name,   homeAbbrev: homeResolved.abbrev,
+        awayTeam: awayResolved.name,   awayAbbrev: awayResolved.abbrev,
+        venue,
+        date: cells[0]?.trim() ?? '',
+        homeScore,
+        awayScore,
+      });
+    }
+  }
+
+  console.log(`[FW match-list] parsed ${entries.length} matches`);
+  return entries;
+}
+
+async function fetchMatchList(year: number): Promise<MatchEntry[]> {
+  const html = await fetchWithRetry(
+    `https://www.footywire.com/afl/footy/ft_match_list?year=${year}`
+  );
+  return parseMatchListPage(html);
+}
 
 // Parse supercoach_round?year=Y&round=R — returns all players' SC score for that round
 //
@@ -597,17 +688,19 @@ async function fetchRoundScoresBulk(
   const output: Record<number, PlayerRoundScores> = {};
   for (const player of players) {
     const norm = normaliseName(`${player.first_name} ${player.last_name}`);
-    // Collect in most-recent-first order
-    const scores: number[] = [];
+    const roundScores: Record<number, number> = {};
+    const recentFirst: number[] = [];
     for (let i = roundScoreMaps.length - 1; i >= 0; i--) {
-      const score = roundScoreMaps[i][norm];
-      if (score !== undefined && score > 0) scores.push(score);
+      const score = roundScoreMaps[i][norm] ?? 0;
+      roundScores[i] = score;
+      if (score > 0) recentFirst.push(score);
     }
     output[player.id] = {
-      lastScore: scores[0] ?? 0,
-      avg5: scores.length > 0
-        ? scores.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(scores.length, 5)
+      lastScore: recentFirst[0] ?? 0,
+      avg5: recentFirst.length > 0
+        ? recentFirst.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(recentFirst.length, 5)
         : 0,
+      roundScores,
     };
   }
 
@@ -665,9 +758,11 @@ async function fetchAllPlayerRoundScores(year: number, players: Player[]): Promi
   slugEntries.forEach(({ id }, i) => {
     const roundMap = roundMaps[i] ?? new Map<number, number>();
     const sorted = Array.from(roundMap.entries()).sort(([a], [b]) => b - a).map(([, s]) => s);
+    const roundScores: Record<number, number> = Object.fromEntries(roundMap.entries());
     output[id] = {
       lastScore: sorted[0] ?? 0,
       avg5: sorted.length > 0 ? sorted.slice(0, 5).reduce((a, b) => a + b, 0) / Math.min(sorted.length, 5) : 0,
+      roundScores,
     };
   });
   return output;
@@ -693,4 +788,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, normaliseName, lookupPlayer };

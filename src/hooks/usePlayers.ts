@@ -5,11 +5,21 @@ import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
+export { PlayerRoundScores };
+
 export function usePlayers(year: number, round: number) {
   return useQuery({
     queryKey: ['players', 'v11', year, round],
     queryFn: () => supercoachApi.fetchPlayers(year, round),
     staleTime: 1000 * 60 * 30, // 30 min cache
+  });
+}
+
+export function useMatchList(year: number) {
+  return useQuery({
+    queryKey: ['match-list', year],
+    queryFn: () => footywireApi.fetchMatchList(year),
+    staleTime: 1000 * 60 * 60, // 1 hour — fixture list rarely changes mid-session
   });
 }
 

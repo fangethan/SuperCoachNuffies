@@ -4,7 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player } from '../types';
 
-const STORAGE_KEY = 'round_scores_v4';
+const STORAGE_KEY = 'round_scores_v5';
 
 interface StoredScores {
   year: number;
