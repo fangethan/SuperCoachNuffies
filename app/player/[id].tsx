@@ -221,7 +221,7 @@ export default function PlayerDetailScreen() {
             </View>
             <View style={styles.matchupItem}>
               <Text style={styles.matchupLabel}>Venue</Text>
-              <Text style={styles.matchupValue} numberOfLines={1}>{nextMatch.venue || '-'}</Text>
+              <Text style={styles.matchupValue}>{nextMatch.venue || '-'}</Text>
             </View>
             <View style={styles.matchupItem}>
               <Text style={styles.matchupLabel}>Venue Avg</Text>

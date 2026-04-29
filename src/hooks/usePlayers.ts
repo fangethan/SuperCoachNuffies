@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
 import { footywireApi, PlayerRoundScores, MatchEntry } from '../api/footywire';
@@ -168,6 +168,8 @@ export interface MatchupStats {
 }
 
 export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntry | undefined) {
+  const queryClient = useQueryClient();
+
   return useQuery<MatchupStats | null>({
     queryKey: ['matchup-stats', 'v3', player?.id, nextMatch?.round],
     enabled: !!(player && nextMatch),
@@ -180,12 +182,15 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
       const oppAbbrev = isHome ? nextMatch.awayAbbrev : nextMatch.homeAbbrev;
       const venue = nextMatch.venue;
 
-      console.log(`[Matchup] player="${player.first_name} ${player.last_name}" team="${player.team.name}" opp="${opponent}" venue="${venue}"`);
-
+      // Fetch match lists via queryClient so pre-cached data is reused instantly
       const [historicalMatchLists, historicalScores] = await Promise.all([
         Promise.all(
           HISTORICAL_YEARS.map(year =>
-            footywireApi.fetchMatchList(year).catch(() => [] as MatchEntry[])
+            queryClient.fetchQuery({
+              queryKey: ['match-list', year],
+              queryFn: () => footywireApi.fetchMatchList(year),
+              staleTime: 1000 * 60 * 60,
+            }).catch(() => [] as MatchEntry[])
           )
         ),
         footywireApi.fetchPlayerHistoricalScores(

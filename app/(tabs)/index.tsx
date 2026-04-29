@@ -3,7 +3,7 @@ import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { footywireApi } from '../../src/api/footywire';
 import { useCurrentRound } from '../../src/hooks/useCurrentRound';
@@ -46,6 +46,11 @@ export default function PlayersScreen() {
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, round);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
+
+  // Pre-warm match list cache so player profile matchup stats load instantly
+  useMatchList(CURRENT_YEAR);
+  useMatchList(2025);
+  useMatchList(2024);
 
   // price_change on each player is already the last-round change from Footywire prices page
   const weeklyPriceMap = useMemo(() => {
