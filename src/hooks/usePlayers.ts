@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
-import { footywireApi, PlayerRoundScores } from '../api/footywire';
+import { footywireApi, PlayerRoundScores, MatchEntry } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
 
@@ -153,4 +153,79 @@ export function useFilteredPlayers(
   });
 
   return filtered;
+}
+
+// ─── Matchup stats ────────────────────────────────────────────────────────────
+
+const HISTORICAL_YEARS = [2026, 2025, 2024];
+
+export interface MatchupStats {
+  opponent: string;
+  oppAbbrev: string;
+  venue: string;
+  oppAvg: number;
+  venueAvg: number;
+}
+
+export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntry | undefined) {
+  return useQuery<MatchupStats | null>({
+    queryKey: ['matchup-stats', 'v3', player?.id, nextMatch?.round],
+    enabled: !!(player && nextMatch),
+    staleTime: 1000 * 60 * 60 * 24,
+    queryFn: async () => {
+      if (!player || !nextMatch) return null;
+
+      const isHome = nextMatch.homeTeam === player.team.name;
+      const opponent = isHome ? nextMatch.awayTeam : nextMatch.homeTeam;
+      const oppAbbrev = isHome ? nextMatch.awayAbbrev : nextMatch.homeAbbrev;
+      const venue = nextMatch.venue;
+
+      console.log(`[Matchup] player="${player.first_name} ${player.last_name}" team="${player.team.name}" opp="${opponent}" venue="${venue}"`);
+
+      const [historicalMatchLists, historicalScores] = await Promise.all([
+        Promise.all(
+          HISTORICAL_YEARS.map(year =>
+            footywireApi.fetchMatchList(year).catch(() => [] as MatchEntry[])
+          )
+        ),
+        footywireApi.fetchPlayerHistoricalScores(
+          player.first_name,
+          player.last_name,
+          player.team.name,
+          HISTORICAL_YEARS,
+        ),
+      ]);
+
+      const oppScores: number[] = [];
+      const venueScores: number[] = [];
+
+      HISTORICAL_YEARS.forEach((year, i) => {
+        const matchList = historicalMatchLists[i];
+        const scoreMap = historicalScores[year] ?? new Map<number, number>();
+
+        const teamMatches = matchList.filter(
+          m => m.homeTeam === player.team.name || m.awayTeam === player.team.name
+        );
+
+        console.log(`[Matchup] year=${year} teamMatches=${teamMatches.length} scoreMapSize=${scoreMap.size}`);
+
+        for (const match of teamMatches) {
+          const score = scoreMap.get(match.round);
+          if (!score || score <= 0) continue;
+          const matchIsHome = match.homeTeam === player.team.name;
+          const matchOpp = matchIsHome ? match.awayTeam : match.homeTeam;
+          console.log(`[Matchup] year=${year} rnd=${match.round} vs=${matchOpp} @${match.venue} sc=${score}`);
+          if (matchOpp === opponent) oppScores.push(score);
+          if (match.venue === venue) venueScores.push(score);
+        }
+      });
+
+      console.log(`[Matchup] oppScores=${JSON.stringify(oppScores)} venueScores=${JSON.stringify(venueScores)}`);
+
+      const calcAvg = (arr: number[]) =>
+        arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+      return { opponent, oppAbbrev, venue, oppAvg: calcAvg(oppScores), venueAvg: calcAvg(venueScores) };
+    },
+  });
 }

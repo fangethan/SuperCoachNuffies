@@ -286,9 +286,45 @@ function parsePricesPage(html: string): Record<string, PricesRow> {
   return result;
 }
 
-// Player profile page (pu-{team}--{player}?year=Y)
-// Table columns: Round | Price | SC Score | Value
-// Validates price > 100k to skip nav/header rows, then extracts scored rounds
+// Player profile page (pu-{team}--{player})
+// The page contains ALL historical years. Year sections are detected when the round
+// number resets (goes backward), e.g. ...7 → 1 means the 2025 section just started.
+// Returns Record<year, Map<round, score>>.
+function parsePlayerAllYearsPage(html: string, latestYear: number): Record<number, Map<number, number>> {
+  const result: Record<number, Map<number, number>> = {};
+  if (!html) return result;
+
+  let year = latestYear;
+  let prevRound = -1;
+
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = extractCells(m[1]);
+    if (cells.length < 3) continue;
+    const round = parseInt(cells[0], 10);
+    // Allow round 0 (AFL Opening Round) — it counts toward avgs
+    if (isNaN(round) || round < 0 || round > 30) continue;
+    const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
+    if (isNaN(price) || price < 100_000) continue;
+
+    // Round went backward (or stayed at 0 → 0) → new season section has started.
+    // prevRound >= 0 so the initial sentinel value of -1 doesn't trigger a false decrement.
+    if (prevRound >= 0 && round <= prevRound) {
+      year--;
+    }
+    prevRound = round;
+
+    if (!result[year]) result[year] = new Map();
+    const scoreStr = (cells[2] ?? '').trim();
+    if (!scoreStr || scoreStr === '--' || scoreStr === 'DNP') continue;
+    const score = parseInt(scoreStr, 10);
+    if (!isNaN(score) && score >= 0) result[year].set(round, score);
+  }
+  return result;
+}
+
+// Keep the single-year parser for use by fetchAllPlayerRoundScores (legacy path)
 function parsePlayerRoundPage(html: string): Map<number, number> {
   const scores = new Map<number, number>();
   if (!html) return scores;
@@ -302,7 +338,6 @@ function parsePlayerRoundPage(html: string): Map<number, number> {
     if (isNaN(round) || round < 1 || round > 30) continue;
     const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
     if (isNaN(price) || price < 100_000) continue;
-    // Round 1 appearing a second time means we've hit the previous year's section
     if (round === 1) {
       if (seenRound1) break;
       seenRound1 = true;
@@ -768,6 +803,37 @@ async function fetchAllPlayerRoundScores(year: number, players: Player[]): Promi
   return output;
 }
 
+// Fetch a player's round→score map for multiple years from a single pu- page fetch.
+// FW ignores the ?year= param — the page always returns the full multi-year history.
+// We parse all year sections at once by detecting when round numbers reset.
+async function fetchPlayerHistoricalScores(
+  firstName: string,
+  lastName: string,
+  teamName: string,
+  years: number[],
+): Promise<Record<number, Map<number, number>>> {
+  const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
+  console.log(`[HistScores] slug="${slug}" want=${JSON.stringify(years)}`);
+  if (!slug) return {};
+
+  const html = await fetchWithRetry(
+    `https://www.footywire.com/afl/footy/${slug}`
+  ).catch(() => '');
+
+  // The page always leads with the current season. latestYear is the year
+  // assigned to the first section — which is the highest year in the request.
+  const latestYear = Math.max(...years);
+  const allYears = parsePlayerAllYearsPage(html, latestYear);
+
+  console.log(`[HistScores] htmlLen=${html.length} parsed=${Object.entries(allYears).map(([y, m]) => `${y}:${m.size}rds`).join(' ')}`);
+
+  const result: Record<number, Map<number, number>> = {};
+  for (const year of years) {
+    result[year] = allYears[year] ?? new Map();
+  }
+  return result;
+}
+
 // ─── Lookup helpers ───────────────────────────────────────────────────────────
 
 function lookupByNorm(map: FootywireMap, normName: string): FootywirePlayer | undefined {
@@ -788,4 +854,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, normaliseName, lookupPlayer };

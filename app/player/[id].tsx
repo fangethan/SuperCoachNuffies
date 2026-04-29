@@ -1,7 +1,7 @@
 import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
@@ -23,6 +23,12 @@ export default function PlayerDetailScreen() {
   const playerId = player ? player.id : 0;
   const roundScores = roundScoresById[playerId];
   const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
+
+  // Compute nextMatch before early returns so hooks are called unconditionally
+  const nextMatch = matchList
+    ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
+    .sort((a, b) => a.round - b.round)[0];
+  const { data: matchupStats } = useMatchupStats(player, nextMatch);
 
   if (isLoading) {
     return (
@@ -64,8 +70,6 @@ export default function PlayerDetailScreen() {
   const avg3 = stats.avg3 ?? 0;
   const beStatus = ppts === 0 ? 'unknown' : ppts > avg3 * 1.15 ? 'danger' : ppts > avg3 ? 'warning' : 'safe';
 
-  const oppavg = stats.oppavg ?? 0;
-  const venavg = stats.venavg ?? 0;
   const avg = stats.avg ?? 0;
   const avg5 = roundScores?.avg5 ?? 0;
 
@@ -196,31 +200,39 @@ export default function PlayerDetailScreen() {
       {/* Matchup */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>This Week's Matchup</Text>
-        <View style={styles.matchupRow}>
-          <View style={styles.matchupItem}>
-            <Text style={styles.matchupLabel}>vs</Text>
-            <Text style={styles.matchupValue}>{stats.opp?.name ?? '-'}</Text>
+        {nextMatch ? (
+          <View style={styles.matchupRow}>
+            <View style={styles.matchupItem}>
+              <Text style={styles.matchupLabel}>vs</Text>
+              <Text style={styles.matchupValue}>
+                {nextMatch.homeTeam === player.team.name ? nextMatch.awayAbbrev : nextMatch.homeAbbrev}
+              </Text>
+            </View>
+            <View style={styles.matchupItem}>
+              <Text style={styles.matchupLabel}>Opp Avg</Text>
+              <Text style={[
+                styles.matchupValue,
+                (matchupStats?.oppAvg ?? 0) > 75 ? styles.up
+                  : (matchupStats?.oppAvg ?? 0) > 0 && (matchupStats?.oppAvg ?? 0) < 60 ? styles.down
+                  : styles.neutral,
+              ]}>
+                {(matchupStats?.oppAvg ?? 0) > 0 ? matchupStats!.oppAvg.toFixed(1) : '-'}
+              </Text>
+            </View>
+            <View style={styles.matchupItem}>
+              <Text style={styles.matchupLabel}>Venue</Text>
+              <Text style={styles.matchupValue} numberOfLines={1}>{nextMatch.venue || '-'}</Text>
+            </View>
+            <View style={styles.matchupItem}>
+              <Text style={styles.matchupLabel}>Venue Avg</Text>
+              <Text style={styles.matchupValue}>
+                {(matchupStats?.venueAvg ?? 0) > 0 ? matchupStats!.venueAvg.toFixed(1) : '-'}
+              </Text>
+            </View>
           </View>
-          <View style={styles.matchupItem}>
-            <Text style={styles.matchupLabel}>Opp Avg</Text>
-            <Text style={[
-              styles.matchupValue,
-              oppavg > 75 ? styles.up : oppavg < 60 ? styles.down : styles.neutral,
-            ]}>
-              {oppavg > 0 ? oppavg.toFixed(0) : '-'}
-            </Text>
-          </View>
-          <View style={styles.matchupItem}>
-            <Text style={styles.matchupLabel}>Venue</Text>
-            <Text style={styles.matchupValue}>{stats.ven?.short_name ?? '-'}</Text>
-          </View>
-          <View style={styles.matchupItem}>
-            <Text style={styles.matchupLabel}>Venue Avg</Text>
-            <Text style={styles.matchupValue}>
-              {venavg > 0 ? venavg.toFixed(0) : 'N/A'}
-            </Text>
-          </View>
-        </View>
+        ) : (
+          <Text style={styles.matchupValue}>No upcoming games</Text>
+        )}
       </View>
 
       {/* Bye info */}
