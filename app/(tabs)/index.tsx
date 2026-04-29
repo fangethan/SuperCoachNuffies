@@ -15,8 +15,8 @@ import { SortOption, Player } from '../../src/types';
 
 const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'Avg', value: 'avg' },
-  { label: 'L3', value: 'avg3' },
-  { label: 'L5', value: 'avg5' },
+  { label: '3 Rd Avg', value: 'avg3' },
+  { label: '5 Rd Avg', value: 'avg5' },
   { label: 'Score', value: 'points' },
   { label: 'Price', value: 'price' },
   { label: '±$', value: 'price_change' },
@@ -27,8 +27,8 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
 // Sort option short labels shown on card
 export const SORT_CARD_LABEL: Record<SortOption, string> = {
   avg: 'avg',
-  avg3: 'L3 avg',
-  avg5: 'L5 avg',
+  avg3: '3 Rd Avg',
+  avg5: '5 Rd Avg',
   points: 'score',
   price: 'price',
   price_change: '±$',

@@ -131,8 +131,8 @@ export default function PlayerDetailScreen() {
       <View style={styles.statsGrid}>
         <StatBox label="Last Round" value={lastRoundScore} large />
         <StatBox label="Season Avg" value={avg.toFixed(1)} large />
-        <StatBox label="L3 Avg" value={avg3 > 0 ? avg3.toFixed(1) : 'N/A'} large />
-        <StatBox label="L5 Avg" value={avg5 > 0 ? avg5.toFixed(1) : 'N/A'} large />
+        <StatBox label="3 Rd Avg" value={avg3 > 0 ? avg3.toFixed(1) : 'N/A'} large />
+        <StatBox label="5 Rd Avg" value={avg5 > 0 ? avg5.toFixed(1) : 'N/A'} large />
       </View>
 
       {/* Price row */}
@@ -177,10 +177,10 @@ export default function PlayerDetailScreen() {
             <View style={styles.beRight}>
               <Text style={styles.beContext}>
                 {beStatus === 'danger'
-                  ? `Needs ${ppts} pts to stop price drop — ${ppts - avg3 > 0 ? `${(ppts - avg3).toFixed(0)} above` : 'at'} L3 avg`
+                  ? `Needs ${ppts} pts to stop price drop — ${ppts - avg3 > 0 ? `${(ppts - avg3).toFixed(0)} above` : 'at'} 3 Rd Avg`
                   : beStatus === 'warning'
-                  ? `Slightly above L3 avg (${avg3.toFixed(0)}) — price may dip`
-                  : `Below L3 avg (${avg3.toFixed(0)}) — price rising`}
+                  ? `Slightly above 3 Rd Avg (${avg3.toFixed(0)}) — price may dip`
+                  : `Below 3 Rd Avg (${avg3.toFixed(0)}) — price rising`}
                 {likelihood !== null ? `\nLikelihood of hitting BE: ${likelihood}%` : ''}
               </Text>
               <View style={[
@@ -353,14 +353,21 @@ function StatBox({ label, value, large, highlight }: {
 }) {
   return (
     <View style={[boxStyles.box, highlight ? boxStyles.highlight : null]}>
-      <Text style={[
-        boxStyles.value,
-        large ? boxStyles.valueLarge : null,
-        highlight ? boxStyles.valueHighlight : null,
-      ]}>
+      <Text
+        style={[
+          boxStyles.value,
+          large ? boxStyles.valueLarge : null,
+          highlight ? boxStyles.valueHighlight : null,
+        ]}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+        numberOfLines={1}
+      >
         {value}
       </Text>
-      <Text style={boxStyles.label}>{label}</Text>
+      <Text style={boxStyles.label} adjustsFontSizeToFit minimumFontScale={0.7} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -368,14 +375,15 @@ function StatBox({ label, value, large, highlight }: {
 const boxStyles = StyleSheet.create({
   box: {
     flex: 1, backgroundColor: COLORS.surface, borderRadius: 10,
-    padding: 12, alignItems: 'center', borderWidth: 1, borderColor: COLORS.border,
+    paddingVertical: 10, paddingHorizontal: 6,
+    alignItems: 'center', borderWidth: 1, borderColor: COLORS.border,
     marginRight: 8,
   },
   highlight: { borderColor: COLORS.primary, backgroundColor: COLORS.primary + '11' },
-  value: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary },
+  value: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary, width: '100%', textAlign: 'center' },
   valueLarge: { fontSize: 22 },
   valueHighlight: { color: COLORS.primary },
-  label: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  label: { fontSize: 11, color: COLORS.textMuted, marginTop: 2, width: '100%', textAlign: 'center' },
 });
 
 const styles = StyleSheet.create({
