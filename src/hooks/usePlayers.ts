@@ -1,9 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
 import { footywireApi, PlayerRoundScores, MatchEntry } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
+import { CURRENT_YEAR } from '../constants';
 
 export { PlayerRoundScores };
 
@@ -19,7 +21,8 @@ export function useMatchList(year: number) {
   return useQuery({
     queryKey: ['match-list', year],
     queryFn: () => footywireApi.fetchMatchList(year),
-    staleTime: 1000 * 60 * 60, // 1 hour — fixture list rarely changes mid-session
+    // Past seasons never change — cache forever. Current year: 1 hour.
+    staleTime: year < CURRENT_YEAR ? Infinity : 1000 * 60 * 60,
   });
 }
 
@@ -167,6 +170,8 @@ export interface MatchupStats {
   venueAvg: number;
 }
 
+const MATCHUP_STORAGE_KEY = 'matchup_stats_v1';
+
 export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntry | undefined) {
   const queryClient = useQueryClient();
 
@@ -177,19 +182,30 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
     queryFn: async () => {
       if (!player || !nextMatch) return null;
 
+      const cacheKey = `${player.id}_${nextMatch.round}_${CURRENT_YEAR}`;
+
+      // 1. Check AsyncStorage — survives app restarts, invalidated per player+round+year
+      try {
+        const raw = await AsyncStorage.getItem(MATCHUP_STORAGE_KEY);
+        if (raw) {
+          const stored: Record<string, MatchupStats> = JSON.parse(raw);
+          if (stored[cacheKey]) return stored[cacheKey];
+        }
+      } catch { /* ignore */ }
+
       const isHome = nextMatch.homeTeam === player.team.name;
       const opponent = isHome ? nextMatch.awayTeam : nextMatch.homeTeam;
       const oppAbbrev = isHome ? nextMatch.awayAbbrev : nextMatch.homeAbbrev;
       const venue = nextMatch.venue;
 
-      // Fetch match lists via queryClient so pre-cached data is reused instantly
+      // 2. Fetch match lists via queryClient (pre-cached from index screen) + pu- page
       const [historicalMatchLists, historicalScores] = await Promise.all([
         Promise.all(
           HISTORICAL_YEARS.map(year =>
             queryClient.fetchQuery({
               queryKey: ['match-list', year],
               queryFn: () => footywireApi.fetchMatchList(year),
-              staleTime: 1000 * 60 * 60,
+              staleTime: year < CURRENT_YEAR ? Infinity : 1000 * 60 * 60,
             }).catch(() => [] as MatchEntry[])
           )
         ),
@@ -207,30 +223,37 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
       HISTORICAL_YEARS.forEach((year, i) => {
         const matchList = historicalMatchLists[i];
         const scoreMap = historicalScores[year] ?? new Map<number, number>();
-
         const teamMatches = matchList.filter(
           m => m.homeTeam === player.team.name || m.awayTeam === player.team.name
         );
-
-        console.log(`[Matchup] year=${year} teamMatches=${teamMatches.length} scoreMapSize=${scoreMap.size}`);
-
         for (const match of teamMatches) {
           const score = scoreMap.get(match.round);
           if (!score || score <= 0) continue;
           const matchIsHome = match.homeTeam === player.team.name;
           const matchOpp = matchIsHome ? match.awayTeam : match.homeTeam;
-          console.log(`[Matchup] year=${year} rnd=${match.round} vs=${matchOpp} @${match.venue} sc=${score}`);
           if (matchOpp === opponent) oppScores.push(score);
           if (match.venue === venue) venueScores.push(score);
         }
       });
 
-      console.log(`[Matchup] oppScores=${JSON.stringify(oppScores)} venueScores=${JSON.stringify(venueScores)}`);
-
       const calcAvg = (arr: number[]) =>
         arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 
-      return { opponent, oppAbbrev, venue, oppAvg: calcAvg(oppScores), venueAvg: calcAvg(venueScores) };
+      const result: MatchupStats = {
+        opponent, oppAbbrev, venue,
+        oppAvg: calcAvg(oppScores),
+        venueAvg: calcAvg(venueScores),
+      };
+
+      // 3. Persist to AsyncStorage for instant cold-start next time
+      try {
+        const raw = await AsyncStorage.getItem(MATCHUP_STORAGE_KEY);
+        const stored: Record<string, MatchupStats> = raw ? JSON.parse(raw) : {};
+        stored[cacheKey] = result;
+        await AsyncStorage.setItem(MATCHUP_STORAGE_KEY, JSON.stringify(stored));
+      } catch { /* ignore */ }
+
+      return result;
     },
   });
 }

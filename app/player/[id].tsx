@@ -221,7 +221,7 @@ export default function PlayerDetailScreen() {
             </View>
             <View style={styles.matchupItem}>
               <Text style={styles.matchupLabel}>Venue</Text>
-              <Text style={styles.matchupValue}>{nextMatch.venue || '-'}</Text>
+              <Text style={styles.matchupValue}>{shortenVenue(nextMatch.venue) || '-'}</Text>
             </View>
             <View style={styles.matchupItem}>
               <Text style={styles.matchupLabel}>Venue Avg</Text>
@@ -344,6 +344,10 @@ export default function PlayerDetailScreen() {
   );
 }
 
+function shortenVenue(v: string): string {
+  return v.replace(/ Stadium$/, '').replace(/ Arena$/, '').replace(/ Oval$/, '').replace(/ Park$/, '');
+}
+
 function StatBox({ label, value, large, highlight }: {
   label: string; value: string; large?: boolean; highlight?: boolean;
 }) {
@@ -419,7 +423,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: COLORS.border,
   },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 12 },
-  matchupRow: { flexDirection: 'row' },
+  matchupRow: { flexDirection: 'row', alignItems: 'flex-start' },
   matchupItem: { flex: 1, alignItems: 'center' },
   matchupLabel: { fontSize: 11, color: COLORS.textMuted, marginBottom: 3 },
   matchupValue: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary },
