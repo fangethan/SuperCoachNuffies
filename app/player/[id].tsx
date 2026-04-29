@@ -288,7 +288,7 @@ export default function PlayerDetailScreen() {
                 <View key={m.round} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
                   <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
-                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{m.venue}</Text>
+                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
                   <View style={{ width: 80, alignItems: 'center' }}>
                     <View style={[hfStyles.pill,
                       result === 'W' ? hfStyles.pillWin : result === 'L' ? hfStyles.pillLoss : hfStyles.pillDraw,
@@ -321,7 +321,7 @@ export default function PlayerDetailScreen() {
                 <View key={m.round} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
                   <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
-                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{m.venue}</Text>
+                  <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
                 </View>
               );
             })}
