@@ -17,11 +17,11 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'Avg', value: 'avg' },
   { label: '3 Rd Avg', value: 'avg3' },
   { label: '5 Rd Avg', value: 'avg5' },
-  { label: 'Score', value: 'points' },
+  { label: 'Score', value: 'points' },   // label overridden in render with dynamic round
   { label: 'Price', value: 'price' },
-  { label: '±$', value: 'price_change' },
+  { label: '±$Change', value: 'price_change' },
   { label: 'Own%', value: 'owned' },
-  { label: 'BE', value: 'ppts' },
+  { label: 'Breakeven', value: 'ppts' },
 ];
 
 // Sort option short labels shown on card
@@ -29,11 +29,11 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
   avg: 'avg',
   avg3: '3 Rd Avg',
   avg5: '5 Rd Avg',
-  points: 'score',
+  points: 'Rnd Pts',
   price: 'price',
-  price_change: '±$',
+  price_change: '±$Change',
   owned: 'owned',
-  ppts: 'BE',
+  ppts: 'Breakeven',
 };
 
 export default function PlayersScreen() {
