@@ -96,25 +96,25 @@ export const CURRENT_YEAR = 2026;
 export const CURRENT_ROUND = 3;
 export const HISTORICAL_YEARS = [2025, 2024, 2023];
 
-// AFL team colours keyed by full team name (as returned by the API)
-export const TEAM_COLORS: Record<string, { primary: string; secondary: string }> = {
-  'Adelaide':           { primary: '#CC2031', secondary: '#FFD300' },
-  'Brisbane Lions':     { primary: '#A30046', secondary: '#0052A5' },
-  'Carlton':            { primary: '#002B5B', secondary: '#FFFFFF' },
-  'Collingwood':        { primary: '#000000', secondary: '#FFFFFF' },
-  'Essendon':           { primary: '#CC2031', secondary: '#000000' },
-  'Fremantle':          { primary: '#2A1A5E', secondary: '#FFFFFF' },
-  'Geelong':            { primary: '#001F5B', secondary: '#FFFFFF' },
-  'Gold Coast':         { primary: '#E21937', secondary: '#FFCD00' },
-  'GWS':                { primary: '#F15A22', secondary: '#7C878E' },
-  'Greater Western Sydney': { primary: '#F15A22', secondary: '#7C878E' },
-  'Hawthorn':           { primary: '#4D2004', secondary: '#FBB726' },
-  'Melbourne':          { primary: '#CC2031', secondary: '#061A33' },
-  'North Melbourne':    { primary: '#003083', secondary: '#FFFFFF' },
-  'Port Adelaide':      { primary: '#008AAB', secondary: '#000000' },
-  'Richmond':           { primary: '#FFD200', secondary: '#000000' },
-  'St Kilda':           { primary: '#ED0029', secondary: '#000000' },
-  'Sydney':             { primary: '#E2231A', secondary: '#FFFFFF' },
-  'West Coast':         { primary: '#003087', secondary: '#F2A900' },
-  'Western Bulldogs':   { primary: '#CC0000', secondary: '#003087' },
+// AFL team colours keyed by full team name (as returned by the API).
+// colors: 2 or 3 sections. direction: 'v' = vertical split (default), 'h' = horizontal bands.
+export const TEAM_COLORS: Record<string, { colors: string[]; direction?: 'h' | 'v' }> = {
+  'Adelaide':           { colors: ['#001F5B', '#CC2031', '#FFD300'], direction: 'h' },
+  'Brisbane':           { colors: ['#0052A5', '#A30046', '#FDB927'], direction: 'h' },
+  'Carlton':            { colors: ['#002B5B'] },
+  'Collingwood':        { colors: ['#000000', '#FFFFFF', '#000000'] },
+  'Essendon':           { colors: ['#CC2031', '#000000'] },
+  'Fremantle':          { colors: ['#2A1A5E', '#FFFFFF'] },
+  'Geelong':            { colors: ['#001F5B', '#FFFFFF', '#001F5B'], direction: 'h' },
+  'Gold Coast':         { colors: ['#E21937', '#FFCD00'] },
+  'GWS Giants':         { colors: ['#F15A22', '#7C878E'], direction: 'h' },
+  'Hawthorn':           { colors: ['#4D2004', '#FBB726', '#4D2004'] },
+  'Melbourne':          { colors: ['#CC2031', '#061A33'], direction: 'h' },
+  'North Melbourne':    { colors: ['#003083', '#FFFFFF', '#003083'] },
+  'Port Adelaide':      { colors: ['#008AAB', '#000000'], direction: 'h' },
+  'Richmond':           { colors: ['#FFD200', '#000000'] },
+  'St Kilda':           { colors: ['#ED0029', '#FFFFFF', '#000000'] },
+  'Sydney':             { colors: ['#E2231A', '#FFFFFF'], direction: 'h' },
+  'West Coast':         { colors: ['#003087', '#F2A900'] },
+  'Western Bulldogs':   { colors: ['#CC0000', '#FFFFFF', '#003087'], direction: 'h' },
 };
