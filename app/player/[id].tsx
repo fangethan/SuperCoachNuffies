@@ -89,28 +89,26 @@ export default function PlayerDetailScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerBadgeRow}>
-          {isDPP ? (
-            <View style={styles.dppRow}>
-              {allPositions.map((p, i) => {
-                const col = POSITIONS[p as keyof typeof POSITIONS]?.color ?? COLORS.primary;
-                return (
-                  <React.Fragment key={p}>
-                    {i > 0 && <Text style={styles.dppSlash}>/</Text>}
-                    <View style={[styles.posBadge, { backgroundColor: col }]}>
-                      <Text style={styles.posText}>{p}</Text>
-                    </View>
-                  </React.Fragment>
-                );
-              })}
-            </View>
-          ) : (
-            <View style={[styles.posBadge, { backgroundColor: posColor }]}>
-              <Text style={styles.posText}>{pos}</Text>
-            </View>
-          )}
-          <TeamBadge teamName={player.team?.name ?? ''} abbrev={player.team?.abbrev ?? ''} size={44} />
-        </View>
+        <TeamBadge teamName={player.team?.name ?? ''} size={46} />
+        {isDPP ? (
+          <View style={styles.dppRow}>
+            {allPositions.map((p, i) => {
+              const col = POSITIONS[p as keyof typeof POSITIONS]?.color ?? COLORS.primary;
+              return (
+                <React.Fragment key={p}>
+                  {i > 0 && <Text style={styles.dppSlash}>/</Text>}
+                  <View style={[styles.posBadge, { backgroundColor: col }]}>
+                    <Text style={styles.posText}>{p}</Text>
+                  </View>
+                </React.Fragment>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={[styles.posBadge, { backgroundColor: posColor }]}>
+            <Text style={styles.posText}>{pos}</Text>
+          </View>
+        )}
         <Text style={styles.name}>{player.first_name} {player.last_name}</Text>
         <Text style={styles.team}>{player.team?.name ?? ''}</Text>
         {showInjBanner ? (
@@ -395,13 +393,12 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 40 },
   centre: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
   errorText: { color: COLORS.danger },
-  header: { alignItems: 'center', marginBottom: 20 },
-  headerBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  posBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4 },
+  header: { alignItems: 'center', marginBottom: 16 },
+  posBadge: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 4, marginTop: 12, marginBottom: 2 },
   posText: { fontWeight: '800', fontSize: 13, color: '#fff' },
-  dppRow: { flexDirection: 'row', alignItems: 'center' },
-  dppSlash: { fontSize: 16, fontWeight: '300', color: COLORS.textMuted, marginHorizontal: 4, marginBottom: 8 },
-  name: { fontSize: 26, fontWeight: '800', color: COLORS.textPrimary, textAlign: 'center' },
+  dppRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, marginBottom: 2 },
+  dppSlash: { fontSize: 16, fontWeight: '300', color: COLORS.textMuted, marginHorizontal: 4 },
+  name: { fontSize: 26, fontWeight: '800', color: COLORS.textPrimary, textAlign: 'center', marginTop: 2 },
   team: { fontSize: 15, color: COLORS.textSecondary, marginTop: 2 },
   injBanner: {
     backgroundColor: COLORS.danger + '22', borderRadius: 10,
