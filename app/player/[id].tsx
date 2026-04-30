@@ -341,6 +341,7 @@ export default function PlayerDetailScreen() {
             ) : history.map(m => {
               const isHome = m.homeTeam === player.team.name;
               const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
+              const oppTeamName = isHome ? m.awayTeam : m.homeTeam;
               const myScore  = isHome ? m.homeScore! : m.awayScore!;
               const oppScore = isHome ? m.awayScore! : m.homeScore!;
               const result   = myScore > oppScore ? 'W' : myScore < oppScore ? 'L' : 'D';
@@ -348,7 +349,10 @@ export default function PlayerDetailScreen() {
               return (
                 <View key={m.round} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
-                  <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  <View style={[hfStyles.oppCell, { width: 82 }]}>
+                    <TeamBadge teamName={oppTeamName} size={16} />
+                    <Text style={hfStyles.cell}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  </View>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
                   <View style={{ width: 80, alignItems: 'center' }}>
                     <View style={[hfStyles.pill,
@@ -379,6 +383,7 @@ export default function PlayerDetailScreen() {
             ) : fixtures.map(m => {
               const isHome    = m.homeTeam === player.team.name;
               const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
+              const oppTeamName = isHome ? m.awayTeam : m.homeTeam;
               const proj      = projectedPrices[m.round];
               const projColor = !proj ? COLORS.textMuted
                 : proj.delta > 0 ? COLORS.success
@@ -387,7 +392,10 @@ export default function PlayerDetailScreen() {
               return (
                 <View key={m.round} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 34, textAlign: 'center' }]}>{m.round}</Text>
-                  <Text style={[hfStyles.cell, { width: 76, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  <View style={[hfStyles.oppCell, { width: 76 }]}>
+                    <TeamBadge teamName={oppTeamName} size={16} />
+                    <Text style={hfStyles.cell}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  </View>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
                   <View style={{ width: 68, alignItems: 'flex-end' }}>
                     {proj ? (
@@ -580,6 +588,7 @@ const hfStyles = StyleSheet.create({
     borderBottomColor: COLORS.border + '55',
   },
   cell: { fontSize: 13, color: COLORS.textPrimary },
+  oppCell: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   pill: {
     borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4,
     alignItems: 'center', justifyContent: 'center', minWidth: 64,
