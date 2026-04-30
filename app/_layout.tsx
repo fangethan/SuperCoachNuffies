@@ -1,21 +1,30 @@
 import { Stack } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { COLORS, CURRENT_YEAR } from '../src/constants';
 import { useAppStore } from '../src/store/useAppStore';
 import { useCurrentRound } from '../src/hooks/useCurrentRound';
 
 const queryClient = new QueryClient();
 
-// Detects the current round globally and syncs it to the store
-// so every tab reacts to round changes automatically
+// Detects the current round globally and syncs it to the store.
+// maxRound is always updated (so the round picker knows the upper bound).
+// currentRound is only set once on first detection — user picks via the
+// round picker are not overridden on subsequent 15-min refetches.
 function RoundSync() {
   const { data: detectedRound } = useCurrentRound(CURRENT_YEAR);
-  const setCurrentRound = useAppStore(s => s.setCurrentRound);
+  const { setCurrentRound, setMaxRound } = useAppStore();
+  const initialized = useRef(false);
 
   useEffect(() => {
-    if (detectedRound) setCurrentRound(detectedRound);
+    if (detectedRound) {
+      setMaxRound(detectedRound);
+      if (!initialized.current) {
+        setCurrentRound(detectedRound);
+        initialized.current = true;
+      }
+    }
   }, [detectedRound]);
 
   return null;

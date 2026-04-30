@@ -6,7 +6,6 @@ import {
 import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { footywireApi } from '../../src/api/footywire';
-import { useCurrentRound } from '../../src/hooks/useCurrentRound';
 import { PlayerCard } from '../../src/components/PlayerCard';
 import { PositionFilterBar } from '../../src/components/PositionFilter';
 import { useAppStore } from '../../src/store/useAppStore';
@@ -14,6 +13,7 @@ import { COLORS, CURRENT_YEAR } from '../../src/constants';
 import { SortOption, Player } from '../../src/types';
 
 const SORT_OPTIONS: { label: string; value: SortOption }[] = [
+  { label: 'Total Pts', value: 'total_pts' },
   { label: 'Avg', value: 'avg' },
   { label: '3 Rd Avg', value: 'avg3' },
   { label: '5 Rd Avg', value: 'avg5' },
@@ -26,6 +26,7 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
 
 // Sort option short labels shown on card
 export const SORT_CARD_LABEL: Record<SortOption, string> = {
+  total_pts: 'total pts',
   avg: 'avg',
   avg3: '3 Rd Avg',
   avg5: '5 Rd Avg',
@@ -37,13 +38,15 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
 };
 
 export default function PlayersScreen() {
-  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, currentRound, setCurrentRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
+  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, currentRound, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
 
-  // Auto-detect current round
-  const { data: detectedRound } = useCurrentRound(CURRENT_YEAR);
-  const round = detectedRound ?? currentRound;
+  const isHistorical = currentRound < maxRound;
 
-  const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, round);
+  // scoreRound: for historical picks use that round directly; for the live round
+  // use maxRound-1 (the last fully completed round).
+  const scoreRound = isHistorical ? currentRound : Math.max(1, maxRound - 1);
+
+  const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, currentRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
 
@@ -52,7 +55,6 @@ export default function PlayersScreen() {
   useMatchList(2025);
   useMatchList(2024);
 
-  // price_change on each player is already the last-round change from Footywire prices page
   const weeklyPriceMap = useMemo(() => {
     if (!players) return {} as Record<number, number>;
     return Object.fromEntries(
@@ -70,10 +72,10 @@ export default function PlayersScreen() {
     return map;
   }, [players, fwMap]);
 
-  // Round scores: fetches once per round, persisted on-device via AsyncStorage
-  const { data: roundScoresById, isLoading: roundScoresLoading } = useRoundScores(CURRENT_YEAR, round, players ?? []);
+  // Fetch scores through scoreRound (the specific round being viewed)
+  const { data: roundScoresById, isLoading: roundScoresLoading } = useRoundScores(CURRENT_YEAR, scoreRound, players ?? []);
 
-  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading);
+  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading, scoreRound);
 
   // Memoised render for FlatList performance
   const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => {
@@ -88,9 +90,10 @@ export default function PlayersScreen() {
         fwInjuryStatus={fw?.injuryStatus ?? null}
         fwBreakeven={fw?.breakeven}
         roundScores={roundScoresById[item.id]}
+        scoreRound={scoreRound}
       />
     );
-  }, [byeMap, myTeamIds, weeklyPriceMap, fwMap, roundScoresById]);
+  }, [byeMap, myTeamIds, weeklyPriceMap, fwMap, roundScoresById, scoreRound]);
 
   const keyExtractor = useCallback((item: Player) => String(item.id), []);
 
@@ -115,9 +118,9 @@ export default function PlayersScreen() {
     <View style={styles.container}>
       {/* Round indicator */}
       <View style={styles.roundRow}>
-        <Text style={styles.roundLabel}>Round {round}</Text>
-        <View style={styles.roundDot} />
-        <Text style={styles.roundSub}>Live data</Text>
+        <Text style={styles.roundLabel}>Round {currentRound}</Text>
+        <View style={[styles.roundDot, isHistorical && styles.roundDotHistorical]} />
+        <Text style={styles.roundSub}>{isHistorical ? 'Historical' : 'Live data'}</Text>
       </View>
 
       {/* Search */}
@@ -156,7 +159,7 @@ export default function PlayersScreen() {
             onPress={() => setSortBy(opt.value)}
           >
             <Text style={[styles.sortLabel, sortBy === opt.value && styles.sortLabelActive]}>
-              {opt.value === 'points' ? `Rnd ${Math.max(1, round - 1)} Pts` : opt.label}
+              {opt.value === 'points' ? `Rnd ${scoreRound} Pts` : opt.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -214,6 +217,9 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     backgroundColor: COLORS.success,
     marginHorizontal: 6,
+  },
+  roundDotHistorical: {
+    backgroundColor: COLORS.warning,
   },
   roundSub: {
     fontSize: 12,

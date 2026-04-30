@@ -1,5 +1,8 @@
 import { Tabs } from 'expo-router';
 import { COLORS } from '../../src/constants';
+import { RoundPicker } from '../../src/components/RoundPicker';
+
+const roundPickerRight = () => <RoundPicker />;
 
 export default function TabsLayout() {
   return (
@@ -20,15 +23,15 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{ title: 'Players', tabBarLabel: 'Players' }}
+        options={{ title: 'Players', tabBarLabel: 'Players', headerRight: roundPickerRight }}
       />
       <Tabs.Screen
         name="captains"
-        options={{ title: 'Captains', tabBarLabel: 'Captains' }}
+        options={{ title: 'Captains', tabBarLabel: 'Captains', headerRight: roundPickerRight }}
       />
       <Tabs.Screen
         name="trades"
-        options={{ title: 'Trades', tabBarLabel: 'Trades' }}
+        options={{ title: 'Trades', tabBarLabel: 'Trades', headerRight: roundPickerRight }}
       />
       <Tabs.Screen
         name="stats"

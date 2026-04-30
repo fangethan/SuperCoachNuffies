@@ -192,7 +192,7 @@ function buildPlayerSlug(teamName: string, fullName: string): string {
     .replace(/\s+/g, '-');
   return `pu-${teamSlug}--${playerSlug}`;
 }
-interface ScoresRow  { avg3: number; positions: Position[]; }
+interface ScoresRow  { avg3: number; totalPoints: number; positions: Position[]; }
 interface PricesRow  { price: number; totalChange: number; lastChange: number; }
 
 // Detect price column by value > 100,000 — works whether or not $ prefix is present
@@ -252,15 +252,15 @@ function parseScoresPage(html: string): Record<string, ScoresRow> {
     if (!name || name.length < 3) continue;
     const priceIdx = findPriceIdx(cells);
     if (priceIdx < 0 || priceIdx + 4 >= cells.length) continue;
+    const totalPoints = parseInt(cells[priceIdx + 2] ?? '0', 10);
     const avg3 = parseFloat(cells[priceIdx + 4] ?? '0');
     if (isNaN(avg3) || avg3 <= 0) continue;
-    // Position is on the second line of the name cell, e.g. "FWD" or "MID/FWD"
     const posText = (parts[1] ?? '').trim();
     const positions = extractPositions(posText || row);
     if (Object.keys(result).length < 5) {
       console.log(`[FW pos DEBUG] name="${name}" posText="${posText}" cells[0]=${JSON.stringify(cells[0]?.slice(0, 60))}`);
     }
-    result[normaliseName(name)] = { avg3, positions };
+    result[normaliseName(name)] = { avg3, totalPoints: isNaN(totalPoints) ? 0 : totalPoints, positions };
   }
   console.log(`[FW scores] parsed ${Object.keys(result).length} players`);
   return result;
@@ -486,7 +486,7 @@ async function fetchAllPlayers(year: number, round: number): Promise<Player[]> {
       round,
 
       points:             lastScore,
-      total_points:       0,
+      total_points:       scores?.totalPoints ?? 0,
       price:              prices?.price       ?? be.price,
       price_change:       prices?.lastChange  ?? 0,
       total_price_change: prices?.totalChange ?? 0,

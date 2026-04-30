@@ -11,7 +11,7 @@ export { PlayerRoundScores };
 
 export function usePlayers(year: number, round: number) {
   return useQuery({
-    queryKey: ['players', 'v11', year, round],
+    queryKey: ['players', 'v12', year, round],
     queryFn: () => supercoachApi.fetchPlayers(year, round),
     staleTime: 1000 * 60 * 30, // 30 min cache
   });
@@ -75,8 +75,14 @@ export function useFilteredPlayers(
   fwBreakevenById: Record<number, number> = {},
   roundScoresById: Record<number, PlayerRoundScores> = {},
   roundScoresLoading = false,
+  scoreRound = 0,  // specific round for 'points' sort; 0 = use lastScore
 ) {
   const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, myTeamIds } = useAppStore();
+
+  const getRoundScore = (id: number) =>
+    scoreRound > 0
+      ? (roundScoresById[id]?.roundScores?.[scoreRound] ?? 0)
+      : (roundScoresById[id]?.lastScore ?? 0);
 
   let filtered = players;
 
@@ -98,18 +104,15 @@ export function useFilteredPlayers(
     );
   }
 
-  // Only filter by score data once the background query has finished loading.
-  // While loading, show all players so the list is never empty.
   if (!roundScoresLoading) {
     if (sortBy === 'avg3') {
       filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
     } else if (sortBy === 'avg5') {
       filtered = filtered.filter(p => (roundScoresById[p.id]?.avg5 ?? 0) > 0);
     } else if (sortBy === 'points') {
-      filtered = filtered.filter(p => (roundScoresById[p.id]?.lastScore ?? 0) > 0);
+      filtered = filtered.filter(p => getRoundScore(p.id) > 0);
     }
   } else if (sortBy === 'avg3') {
-    // L3 comes from the bulk page — always available immediately
     filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
   }
 
@@ -135,9 +138,11 @@ export function useFilteredPlayers(
         break;
       }
       case 'points': {
-        const aScore = roundScoresById[a.id]?.lastScore ?? 0;
-        const bScore = roundScoresById[b.id]?.lastScore ?? 0;
-        diff = bScore - aScore;
+        diff = getRoundScore(b.id) - getRoundScore(a.id);
+        break;
+      }
+      case 'total_pts': {
+        diff = (sb.total_points ?? 0) - (sa.total_points ?? 0);
         break;
       }
       case 'owned':  diff = (sb.owned ?? 0) - (sa.owned ?? 0); break;

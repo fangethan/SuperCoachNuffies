@@ -181,7 +181,8 @@ export type SortOption =
   | 'price_change'
   | 'points'
   | 'owned'
-  | 'ppts';
+  | 'ppts'
+  | 'total_pts';
 
 export type PositionFilter = 'ALL' | 'DEF' | 'MID' | 'FWD' | 'RUC';
 

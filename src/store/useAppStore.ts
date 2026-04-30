@@ -5,8 +5,10 @@ import { CURRENT_ROUND, CURRENT_YEAR } from '../constants';
 interface AppState {
   // Round / year
   currentRound: number;
+  maxRound: number;        // detected live round — upper bound for the round picker
   currentYear: number;
   setCurrentRound: (round: number) => void;
+  setMaxRound: (round: number) => void;
 
   // Filters
   positionFilter: PositionFilter;
@@ -36,12 +38,14 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   currentRound: CURRENT_ROUND,
+  maxRound: CURRENT_ROUND,
   currentYear: CURRENT_YEAR,
   setCurrentRound: (round) => set({ currentRound: round }),
+  setMaxRound: (round) => set({ maxRound: round }),
 
   positionFilter: 'ALL',
   setPositionFilter: (pos) => set({ positionFilter: pos }),
-  sortBy: 'avg',
+  sortBy: 'total_pts',
   setSortBy: (sort) => set({ sortBy: sort, sortAscending: false }),
   sortAscending: false,
   setSortAscending: (v) => set({ sortAscending: v }),
