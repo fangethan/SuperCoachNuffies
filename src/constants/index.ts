@@ -95,3 +95,26 @@ export const SC_STAT_LABELS: Record<string, string> = {
 export const CURRENT_YEAR = 2026;
 export const CURRENT_ROUND = 3;
 export const HISTORICAL_YEARS = [2025, 2024, 2023];
+
+// AFL team colours keyed by full team name (as returned by the API)
+export const TEAM_COLORS: Record<string, { primary: string; secondary: string }> = {
+  'Adelaide':           { primary: '#CC2031', secondary: '#FFD300' },
+  'Brisbane Lions':     { primary: '#A30046', secondary: '#0052A5' },
+  'Carlton':            { primary: '#002B5B', secondary: '#FFFFFF' },
+  'Collingwood':        { primary: '#000000', secondary: '#FFFFFF' },
+  'Essendon':           { primary: '#CC2031', secondary: '#000000' },
+  'Fremantle':          { primary: '#2A1A5E', secondary: '#FFFFFF' },
+  'Geelong':            { primary: '#001F5B', secondary: '#FFFFFF' },
+  'Gold Coast':         { primary: '#E21937', secondary: '#FFCD00' },
+  'GWS':                { primary: '#F15A22', secondary: '#7C878E' },
+  'Greater Western Sydney': { primary: '#F15A22', secondary: '#7C878E' },
+  'Hawthorn':           { primary: '#4D2004', secondary: '#FBB726' },
+  'Melbourne':          { primary: '#CC2031', secondary: '#061A33' },
+  'North Melbourne':    { primary: '#003083', secondary: '#FFFFFF' },
+  'Port Adelaide':      { primary: '#008AAB', secondary: '#000000' },
+  'Richmond':           { primary: '#FFD200', secondary: '#000000' },
+  'St Kilda':           { primary: '#ED0029', secondary: '#000000' },
+  'Sydney':             { primary: '#E2231A', secondary: '#FFFFFF' },
+  'West Coast':         { primary: '#003087', secondary: '#F2A900' },
+  'Western Bulldogs':   { primary: '#CC0000', secondary: '#003087' },
+};

@@ -19,7 +19,7 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: '5 Rd Avg', value: 'avg5' },
   { label: 'Score', value: 'points' },   // label overridden in render with dynamic round
   { label: 'Price', value: 'price' },
-  { label: '±$Change', value: 'price_change' },
+  { label: '±$ Change', value: 'price_change' },
   { label: 'Own%', value: 'owned' },
   { label: 'Breakeven', value: 'ppts' },
 ];
@@ -31,7 +31,7 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
   avg5: '5 Rd Avg',
   points: 'Rnd Pts',
   price: 'price',
-  price_change: '±$Change',
+  price_change: '±$ Change',
   owned: 'owned',
   ppts: 'Breakeven',
 };
@@ -156,7 +156,7 @@ export default function PlayersScreen() {
             onPress={() => setSortBy(opt.value)}
           >
             <Text style={[styles.sortLabel, sortBy === opt.value && styles.sortLabelActive]}>
-              {opt.label}
+              {opt.value === 'points' ? `Rnd ${Math.max(1, round - 1)} Pts` : opt.label}
             </Text>
           </TouchableOpacity>
         ))}

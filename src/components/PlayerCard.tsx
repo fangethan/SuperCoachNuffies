@@ -5,6 +5,7 @@ import { Player } from '../types';
 import { COLORS, POSITIONS } from '../constants';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../utils/scoring';
 import { useAppStore } from '../store/useAppStore';
+import { TeamBadge } from './TeamBadge';
 
 interface Props {
   player: Player;
@@ -64,7 +65,7 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
         const totalCol = totalDir === 'up' ? COLORS.success : totalDir === 'down' ? COLORS.danger : COLORS.textMuted;
         return {
           primaryValue: weekly !== 0 ? formatPriceChange(weekly) : '-',
-          primaryLabel: '±$ this week',
+          primaryLabel: '±$ Change',
           primaryColor: col,
           secondaryValue: total !== 0 ? { text: `(${formatPriceChange(total)})`, color: totalCol } : null,
         };
@@ -127,6 +128,7 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
           ) : null}
         </View>
         <View style={styles.metaRow}>
+          <TeamBadge teamName={player.team?.name ?? ''} abbrev={player.team?.abbrev ?? ''} size={20} />
           <Text style={styles.team}>{player.team?.abbrev ?? ''}</Text>
           {(() => {
             const scInj = player.injury_suspension_status;
@@ -271,6 +273,7 @@ const styles = StyleSheet.create({
   team: {
     fontSize: 12,
     color: COLORS.textSecondary,
+    marginLeft: 5,
     marginRight: 6,
   },
   injBadge: {
