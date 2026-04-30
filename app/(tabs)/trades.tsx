@@ -10,6 +10,7 @@ import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { PositionFilter } from '../../src/types';
 import { useAppStore } from '../../src/store/useAppStore';
+import { TeamBadge } from '../../src/components/TeamBadge';
 
 const POSITIONS_FILTER: PositionFilter[] = ['ALL', 'DEF', 'MID', 'FWD', 'RUC'];
 
@@ -118,14 +119,17 @@ export default function TradesScreen() {
                 <Text style={styles.playerName}>
                   {item.player.first_name} {item.player.last_name}
                 </Text>
-                <Text style={styles.playerMeta}>
-                  {item.player.team.abbrev} · {formatPrice(stats.price)}
-                  {stats.price_change !== 0 && (
-                    <Text style={priceDir === 'up' ? styles.up : styles.down}>
-                      {' '}{formatPriceChange(stats.price_change)}
-                    </Text>
-                  )}
-                </Text>
+                <View style={styles.teamRow}>
+                  <TeamBadge teamName={item.player.team.name} size={20} />
+                  <Text style={styles.playerMeta}>
+                    {item.player.team.abbrev} · {formatPrice(stats.price)}
+                    {stats.price_change !== 0 && (
+                      <Text style={priceDir === 'up' ? styles.up : styles.down}>
+                        {' '}{formatPriceChange(stats.price_change)}
+                      </Text>
+                    )}
+                  </Text>
+                </View>
                 {/* Reasons */}
                 {item.reasons.slice(0, 2).map((r, i) => (
                   <Text key={i} style={styles.reason}>· {r}</Text>
@@ -187,7 +191,8 @@ const styles = StyleSheet.create({
   posText: { fontSize: 11, fontWeight: '700', color: '#fff' },
   cardInfo: { flex: 1, marginRight: 8 },
   playerName: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary, marginBottom: 2 },
-  playerMeta: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 3 },
+  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 3 },
+  playerMeta: { fontSize: 12, color: COLORS.textSecondary },
   reason: { fontSize: 11, color: COLORS.textMuted, lineHeight: 18 },
   up: { color: COLORS.success },
   down: { color: COLORS.danger },

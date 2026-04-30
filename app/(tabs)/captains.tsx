@@ -8,6 +8,7 @@ import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { getCaptainRating, formatPrice } from '../../src/utils/scoring';
 import { Player } from '../../src/types';
 import { PositionFilterBar } from '../../src/components/PositionFilter';
+import { TeamBadge } from '../../src/components/TeamBadge';
 import { useAppStore } from '../../src/store/useAppStore';
 
 interface CaptainCandidate {
@@ -91,7 +92,10 @@ export default function CaptainsScreen() {
               {/* Info */}
               <View style={styles.info}>
                 <Text style={styles.name}>{item.player.first_name} {item.player.last_name}</Text>
-                <Text style={styles.team}>{item.player.team.abbrev} · {formatPrice(stats.price)}</Text>
+                <View style={styles.teamRow}>
+                  <TeamBadge teamName={item.player.team.name} size={20} />
+                  <Text style={styles.team}>{item.player.team.abbrev} · {formatPrice(stats.price)}</Text>
+                </View>
                 <View style={styles.statsRow}>
                   <StatChip label="L3" value={stats.avg3.toFixed(0)} />
                   <StatChip label="L5" value={stats.avg5.toFixed(0)} />
@@ -167,7 +171,8 @@ const styles = StyleSheet.create({
   posText: { fontSize: 10, fontWeight: '700', color: '#fff' },
   info: { flex: 1, marginRight: 8 },
   name: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary, marginBottom: 2 },
-  team: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 6 },
+  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  team: { fontSize: 12, color: COLORS.textSecondary },
   statsRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   right: { alignItems: 'flex-end' },
   projected: { fontSize: 22, fontWeight: '800', color: COLORS.gold },
