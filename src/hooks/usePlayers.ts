@@ -168,18 +168,20 @@ export interface FixtureProjection {
   venueAvg: number; venueGames: number;
 }
 
-const FIXTURE_PROJ_STORAGE_KEY = 'fixture_projections_v1';
+const FIXTURE_PROJ_STORAGE_KEY = 'fixture_projections_v5';
 
 export function useFixtureProjections(
   player: Player | undefined,
   fixtures: MatchEntry[],
   avg3: number,
+  avg: number,
 ) {
   const queryClient = useQueryClient();
+  const baseScore = avg > 0 ? avg : avg3;
 
   return useQuery<Record<number, FixtureProjection>>({
-    queryKey: ['fixture-projections', 'v1', player?.id, CURRENT_YEAR, fixtures.map(f => f.round).join(',')],
-    enabled: !!(player && fixtures.length > 0 && avg3 > 0),
+    queryKey: ['fixture-projections', 'v5', player?.id, CURRENT_YEAR, fixtures.map(f => f.round).join(',')],
+    enabled: !!(player && fixtures.length > 0 && baseScore > 0),
     staleTime: 1000 * 60 * 60 * 24,
     queryFn: async () => {
       if (!player || fixtures.length === 0) return {};
@@ -194,7 +196,6 @@ export function useFixtureProjections(
         }
       } catch { /* ignore */ }
 
-      // Fetch historical match lists (pre-cached) + player pu- page (once for all fixtures)
       const [historicalMatchLists, historicalScores] = await Promise.all([
         Promise.all(
           HISTORICAL_YEARS.map(year =>
@@ -215,7 +216,7 @@ export function useFixtureProjections(
 
       const result: Record<number, FixtureProjection> = {};
 
-      for (const fixture of fixtures) {
+      fixtures.forEach((fixture) => {
         const isHome   = fixture.homeTeam === player.team.name;
         const opponent = isHome ? fixture.awayTeam : fixture.homeTeam;
         const venue    = fixture.venue;
@@ -237,22 +238,22 @@ export function useFixtureProjections(
           }
         });
 
-        const oppAvg    = calcAvg(oppScores);
-        const venueAvg  = calcAvg(venueScores);
+        const oppAvg     = calcAvg(oppScores);
+        const venueAvg   = calcAvg(venueScores);
         const oppGames   = oppScores.length;
         const venueGames = venueScores.length;
 
-        // Blend: require ≥ 2 games for a signal to be trusted
+        // Context blend (used in component as modifier on rolling avg)
         const useOpp   = oppGames >= 2;
         const useVenue = venueGames >= 2;
         let projScore: number;
-        if (useOpp && useVenue) projScore = avg3 * 0.5 + oppAvg * 0.3 + venueAvg * 0.2;
-        else if (useOpp)        projScore = avg3 * 0.7 + oppAvg * 0.3;
-        else if (useVenue)      projScore = avg3 * 0.8 + venueAvg * 0.2;
-        else                    projScore = avg3;
+        if (useOpp && useVenue) projScore = baseScore * 0.5 + oppAvg * 0.3 + venueAvg * 0.2;
+        else if (useOpp)        projScore = baseScore * 0.7 + oppAvg * 0.3;
+        else if (useVenue)      projScore = baseScore * 0.8 + venueAvg * 0.2;
+        else                    projScore = baseScore;
 
         result[fixture.round] = { projScore, oppAvg, oppGames, venueAvg, venueGames };
-      }
+      });
 
       try {
         const raw = await AsyncStorage.getItem(FIXTURE_PROJ_STORAGE_KEY);

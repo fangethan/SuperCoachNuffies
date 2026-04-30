@@ -38,6 +38,7 @@ export default function PlayerDetailScreen() {
     player,
     allFixtures,
     player?.player_stats?.[0]?.avg3 ?? 0,
+    player?.player_stats?.[0]?.avg ?? 0,
   );
 
   if (isLoading) {
@@ -60,8 +61,8 @@ export default function PlayerDetailScreen() {
   const pos = allPositions[0];
   const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
   const isDPP = allPositions.length > 1;
-  const totalPriceChange = stats.total_price_change ?? stats.price_change ?? 0;
-  const priceDir = getPriceDirection(totalPriceChange);
+  const weeklyPriceChange = stats.price_change ?? 0;
+  const priceDir = getPriceDirection(weeklyPriceChange);
   const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
   const futureByeRounds = allByeRounds.filter(r => r > currentRound);
 
@@ -94,19 +95,49 @@ export default function PlayerDetailScreen() {
     .filter(m => m.homeScore === null)
     .sort((a, b) => a.round - b.round);
 
-  // Chain projected price week-by-week.
-  // Per-fixture projected score blends avg3 + opp avg + venue avg (≥2 games each to trust).
-  // BE scales proportionally with price each round to prevent unrealistic death-spirals.
+  // Rolling 3-game window price chain — mirrors how Footywire calculates expected price.
+  // The window starts from the player's last 3 actual scores. Each projected round adds the
+  // projected score to the window and drops the oldest, so the rolling avg naturally zigzags
+  // (a monster game dropping off the window causes the avg to fall, creating a price dip).
+  const sortedPlayedRounds = Object.keys(perRoundScores)
+    .map(Number)
+    .filter(r => perRoundScores[r] > 0)
+    .sort((a, b) => a - b);
+  const padScore = avg > 0 ? avg : avg3;
+  const rollingWindow: number[] = sortedPlayedRounds.slice(-3).map(r => perRoundScores[r]);
+  while (rollingWindow.length < 3) rollingWindow.unshift(padScore);
+
   const projectedPrices: Record<number, { price: number; delta: number }> = {};
   const basePrice = stats.price ?? 0;
   if (ppts > 0 && basePrice > 0) {
     let chainPrice = basePrice;
     let chainBE = ppts;
     for (const m of fixtures) {
-      const projScore = fixtureProjections[m.round]?.projScore ?? avg3;
-      if (projScore <= 0) continue;
+      // Rolling avg replaces the static projScore as our per-round estimate
+      const rollingAvg = rollingWindow.reduce((a, b) => a + b, 0) / rollingWindow.length;
+
+      // Blend opp/venue context on top of the rolling avg.
+      // Opponent history is weighted heavily so round-to-round variation reflects
+      // actual matchup difficulty — a tough opponent historically lowers the projection
+      // below BE even for high-scoring players, creating realistic price dips.
+      const fp = fixtureProjections[m.round];
+      const oppAvg = fp?.oppAvg ?? 0;
+      const venueAvg = fp?.venueAvg ?? 0;
+      const useOpp = (fp?.oppGames ?? 0) >= 2;
+      const useVenue = (fp?.venueGames ?? 0) >= 2;
+      let projScore: number;
+      if (useOpp && useVenue) projScore = oppAvg * 0.5 + venueAvg * 0.2 + rollingAvg * 0.3;
+      else if (useOpp)         projScore = oppAvg * 0.6 + rollingAvg * 0.4;
+      else if (useVenue)       projScore = venueAvg * 0.5 + rollingAvg * 0.5;
+      else                     projScore = rollingAvg;
+
+      // Advance the window: drop oldest score, push this round's projection
+      rollingWindow.shift();
+      rollingWindow.push(projScore);
+
       const change = Math.round((projScore - chainBE) * (chainPrice / SC_PRICE_DIVISOR) / 100) * 100;
       chainPrice = Math.max(0, chainPrice + change);
+      // BE scales linearly with price — if price rises 10%, you need 10% more points to hold it
       chainBE = ppts * (chainPrice / basePrice);
       projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - basePrice };
     }
@@ -177,7 +208,7 @@ export default function PlayerDetailScreen() {
             styles.priceValue,
             priceDir === 'up' ? styles.up : priceDir === 'down' ? styles.down : styles.neutral,
           ]}>
-            {totalPriceChange !== 0 ? formatPriceChange(totalPriceChange) : '-'}
+            {weeklyPriceChange !== 0 ? formatPriceChange(weeklyPriceChange) : '-'}
           </Text>
         </View>
         <View style={styles.priceBox}>
@@ -365,7 +396,7 @@ export default function PlayerDetailScreen() {
                           {formatPrice(proj.price)}
                         </Text>
                         <Text style={{ fontSize: 9, color: projColor }}>
-                          {proj.delta >= 0 ? '+' : ''}{formatPriceChange(proj.delta)}
+                          {formatPriceChange(proj.delta)}
                         </Text>
                       </>
                     ) : (
