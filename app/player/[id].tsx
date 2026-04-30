@@ -1,13 +1,14 @@
 import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
 import { COLORS, POSITIONS, CURRENT_YEAR, SC_PRICE_DIVISOR } from '../../src/constants';
 import { footywireApi, MatchEntry } from '../../src/api/footywire';
 import { TeamBadge } from '../../src/components/TeamBadge';
+import { PlayerScoreChart } from '../../src/components/PlayerScoreChart';
 
 export default function PlayerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -25,11 +26,16 @@ export default function PlayerDetailScreen() {
   const roundScores = roundScoresById[playerId];
   const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
 
+  // Hoist fwPlayer + ppts before hooks so they can be passed as arguments
+  const fwPlayerEarly = fwMap ? footywireApi.lookupPlayer(fwMap, player?.first_name ?? '', player?.last_name ?? '') : undefined;
+  const pptsEarly = fwPlayerEarly?.breakeven ?? stats?.ppts ?? 0;
+
   // Compute nextMatch + all fixtures before early returns so hooks are unconditional
   const nextMatch = matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
     .sort((a, b) => a.round - b.round)[0];
   const { data: matchupStats } = useMatchupStats(player, nextMatch);
+  const { data: roundBEs } = usePlayerRoundBEs(player, CURRENT_YEAR, pptsEarly);
 
   const allFixtures = matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
@@ -417,6 +423,19 @@ export default function PlayerDetailScreen() {
           </>
         )}
       </View>
+
+      {/* Score chart — only render once there are played rounds */}
+      {Object.keys(perRoundScores).some(r => perRoundScores[Number(r)] > 0) ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Score History</Text>
+          <PlayerScoreChart
+            perRoundScores={perRoundScores}
+            perRoundBE={roundBEs}
+            avg={avg}
+            ppts={ppts}
+          />
+        </View>
+      ) : null}
 
       {/* Previous season — only show when data is available */}
       {(player.previous_games ?? 0) > 0 ? (

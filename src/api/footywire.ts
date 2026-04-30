@@ -834,6 +834,69 @@ async function fetchPlayerHistoricalScores(
   return result;
 }
 
+// ─── Per-round BE from price history ─────────────────────────────────────────
+// The player profile page has columns: Round | Price | Score | Value.
+// "Price" at round N is the price BEFORE that round's score is applied.
+// Formula: BE[N] = score[N] - (price[N+1] - price[N]) × 1287 / price[N]
+// For the last played round we fall back to the current published ppts.
+async function fetchPlayerRoundBEs(
+  firstName: string,
+  lastName: string,
+  teamName: string,
+  year: number,
+  currentBE: number,
+): Promise<Record<number, number>> {
+  const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
+  if (!slug) return {};
+
+  const html = await fetchWithRetry(
+    `https://www.footywire.com/afl/footy/${slug}`
+  ).catch(() => '');
+
+  // Collect rows for the target year (page leads with current year, older years follow)
+  const roundData: Array<{ round: number; price: number; score: number | null }> = [];
+  let curYear = year;
+  let prevRound = -1;
+
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = extractCells(m[1]);
+    if (cells.length < 3) continue;
+    const round = parseInt(cells[0], 10);
+    if (isNaN(round) || round < 0 || round > 30) continue;
+    const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
+    if (isNaN(price) || price < 100_000) continue;
+
+    if (prevRound >= 0 && round <= prevRound) {
+      curYear--;
+      if (curYear < year) break; // passed target year, stop
+    }
+    prevRound = round;
+
+    if (curYear === year) {
+      const s = (cells[2] ?? '').trim();
+      const score = s && s !== '--' && s !== 'DNP' ? parseInt(s, 10) : null;
+      roundData.push({ round, price, score: score !== null && !isNaN(score) ? score : null });
+    }
+  }
+
+  roundData.sort((a, b) => a.round - b.round);
+
+  const result: Record<number, number> = {};
+  for (let i = 0; i < roundData.length; i++) {
+    const curr = roundData[i];
+    if (curr.score === null) continue;
+    if (i + 1 < roundData.length) {
+      const priceChange = roundData[i + 1].price - curr.price;
+      result[curr.round] = Math.round(curr.score - (priceChange * 1287 / curr.price));
+    } else {
+      result[curr.round] = currentBE; // last played round → use published ppts
+    }
+  }
+  return result;
+}
+
 // ─── Lookup helpers ───────────────────────────────────────────────────────────
 
 function lookupByNorm(map: FootywireMap, normName: string): FootywirePlayer | undefined {
@@ -854,4 +917,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, fetchPlayerRoundBEs, normaliseName, lookupPlayer };

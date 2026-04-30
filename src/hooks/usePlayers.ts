@@ -163,6 +163,17 @@ export function useFilteredPlayers(
   return filtered;
 }
 
+export function usePlayerRoundBEs(player: Player | undefined, year: number, ppts: number) {
+  return useQuery<Record<number, number>>({
+    queryKey: ['player-round-bes', 'v1', player?.id, year, ppts],
+    queryFn: () => footywireApi.fetchPlayerRoundBEs(
+      player!.first_name, player!.last_name, player!.team.name, year, ppts,
+    ),
+    enabled: !!(player && ppts > 0),
+    staleTime: 1000 * 60 * 30,
+  });
+}
+
 // ─── Fixture projections ──────────────────────────────────────────────────────
 
 const HISTORICAL_YEARS = [2026, 2025, 2024];
