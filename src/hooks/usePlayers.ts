@@ -158,9 +158,115 @@ export function useFilteredPlayers(
   return filtered;
 }
 
-// ─── Matchup stats ────────────────────────────────────────────────────────────
+// ─── Fixture projections ──────────────────────────────────────────────────────
 
 const HISTORICAL_YEARS = [2026, 2025, 2024];
+
+export interface FixtureProjection {
+  projScore: number;
+  oppAvg: number; oppGames: number;
+  venueAvg: number; venueGames: number;
+}
+
+const FIXTURE_PROJ_STORAGE_KEY = 'fixture_projections_v1';
+
+export function useFixtureProjections(
+  player: Player | undefined,
+  fixtures: MatchEntry[],
+  avg3: number,
+) {
+  const queryClient = useQueryClient();
+
+  return useQuery<Record<number, FixtureProjection>>({
+    queryKey: ['fixture-projections', 'v1', player?.id, CURRENT_YEAR, fixtures.map(f => f.round).join(',')],
+    enabled: !!(player && fixtures.length > 0 && avg3 > 0),
+    staleTime: 1000 * 60 * 60 * 24,
+    queryFn: async () => {
+      if (!player || fixtures.length === 0) return {};
+
+      const cacheKey = `${player.id}_${CURRENT_YEAR}_${fixtures.map(f => f.round).join('_')}`;
+
+      try {
+        const raw = await AsyncStorage.getItem(FIXTURE_PROJ_STORAGE_KEY);
+        if (raw) {
+          const stored: Record<string, Record<number, FixtureProjection>> = JSON.parse(raw);
+          if (stored[cacheKey]) return stored[cacheKey];
+        }
+      } catch { /* ignore */ }
+
+      // Fetch historical match lists (pre-cached) + player pu- page (once for all fixtures)
+      const [historicalMatchLists, historicalScores] = await Promise.all([
+        Promise.all(
+          HISTORICAL_YEARS.map(year =>
+            queryClient.fetchQuery({
+              queryKey: ['match-list', year],
+              queryFn: () => footywireApi.fetchMatchList(year),
+              staleTime: year < CURRENT_YEAR ? Infinity : 1000 * 60 * 60,
+            }).catch(() => [] as MatchEntry[])
+          )
+        ),
+        footywireApi.fetchPlayerHistoricalScores(
+          player.first_name, player.last_name, player.team.name, HISTORICAL_YEARS,
+        ),
+      ]);
+
+      const calcAvg = (arr: number[]) =>
+        arr.length > 0 ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+
+      const result: Record<number, FixtureProjection> = {};
+
+      for (const fixture of fixtures) {
+        const isHome   = fixture.homeTeam === player.team.name;
+        const opponent = isHome ? fixture.awayTeam : fixture.homeTeam;
+        const venue    = fixture.venue;
+
+        const oppScores: number[] = [];
+        const venueScores: number[] = [];
+
+        HISTORICAL_YEARS.forEach((year, i) => {
+          const matchList = historicalMatchLists[i];
+          const scoreMap  = historicalScores[year] ?? new Map<number, number>();
+          for (const match of matchList) {
+            if (match.homeTeam !== player.team.name && match.awayTeam !== player.team.name) continue;
+            const score = scoreMap.get(match.round);
+            if (!score || score <= 0) continue;
+            const matchIsHome = match.homeTeam === player.team.name;
+            const matchOpp    = matchIsHome ? match.awayTeam : match.homeTeam;
+            if (matchOpp === opponent) oppScores.push(score);
+            if (match.venue === venue) venueScores.push(score);
+          }
+        });
+
+        const oppAvg    = calcAvg(oppScores);
+        const venueAvg  = calcAvg(venueScores);
+        const oppGames   = oppScores.length;
+        const venueGames = venueScores.length;
+
+        // Blend: require ≥ 2 games for a signal to be trusted
+        const useOpp   = oppGames >= 2;
+        const useVenue = venueGames >= 2;
+        let projScore: number;
+        if (useOpp && useVenue) projScore = avg3 * 0.5 + oppAvg * 0.3 + venueAvg * 0.2;
+        else if (useOpp)        projScore = avg3 * 0.7 + oppAvg * 0.3;
+        else if (useVenue)      projScore = avg3 * 0.8 + venueAvg * 0.2;
+        else                    projScore = avg3;
+
+        result[fixture.round] = { projScore, oppAvg, oppGames, venueAvg, venueGames };
+      }
+
+      try {
+        const raw = await AsyncStorage.getItem(FIXTURE_PROJ_STORAGE_KEY);
+        const stored: Record<string, Record<number, FixtureProjection>> = raw ? JSON.parse(raw) : {};
+        stored[cacheKey] = result;
+        await AsyncStorage.setItem(FIXTURE_PROJ_STORAGE_KEY, JSON.stringify(stored));
+      } catch { /* ignore */ }
+
+      return result;
+    },
+  });
+}
+
+// ─── Matchup stats ────────────────────────────────────────────────────────────
 
 export interface MatchupStats {
   opponent: string;

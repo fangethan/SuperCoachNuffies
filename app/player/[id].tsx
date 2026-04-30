@@ -1,11 +1,11 @@
 import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats } from '../../src/hooks/usePlayers';
+import { useLocalSearchParams, Stack } from 'expo-router';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
-import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR, SC_PRICE_DIVISOR } from '../../src/constants';
 import { footywireApi, MatchEntry } from '../../src/api/footywire';
 import { TeamBadge } from '../../src/components/TeamBadge';
 
@@ -25,11 +25,20 @@ export default function PlayerDetailScreen() {
   const roundScores = roundScoresById[playerId];
   const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
 
-  // Compute nextMatch before early returns so hooks are called unconditionally
+  // Compute nextMatch + all fixtures before early returns so hooks are unconditional
   const nextMatch = matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
     .sort((a, b) => a.round - b.round)[0];
   const { data: matchupStats } = useMatchupStats(player, nextMatch);
+
+  const allFixtures = matchList
+    ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
+    .sort((a, b) => a.round - b.round) ?? [];
+  const { data: fixtureProjections = {} } = useFixtureProjections(
+    player,
+    allFixtures,
+    player?.player_stats?.[0]?.avg3 ?? 0,
+  );
 
   if (isLoading) {
     return (
@@ -85,8 +94,27 @@ export default function PlayerDetailScreen() {
     .filter(m => m.homeScore === null)
     .sort((a, b) => a.round - b.round);
 
+  // Chain projected price week-by-week.
+  // Per-fixture projected score blends avg3 + opp avg + venue avg (≥2 games each to trust).
+  // BE scales proportionally with price each round to prevent unrealistic death-spirals.
+  const projectedPrices: Record<number, { price: number; delta: number }> = {};
+  const basePrice = stats.price ?? 0;
+  if (ppts > 0 && basePrice > 0) {
+    let chainPrice = basePrice;
+    let chainBE = ppts;
+    for (const m of fixtures) {
+      const projScore = fixtureProjections[m.round]?.projScore ?? avg3;
+      if (projScore <= 0) continue;
+      const change = Math.round((projScore - chainBE) * (chainPrice / SC_PRICE_DIVISOR) / 100) * 100;
+      chainPrice = Math.max(0, chainPrice + change);
+      chainBE = ppts * (chainPrice / basePrice);
+      projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - basePrice };
+    }
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <Stack.Screen options={{ title: `${player.first_name} ${player.last_name}` }} />
       {/* Header */}
       <View style={styles.header}>
         <TeamBadge teamName={player.team?.name ?? ''} size={46} />
@@ -310,20 +338,40 @@ export default function PlayerDetailScreen() {
         {activeTab === 'fixtures' && (
           <>
             <View style={hfStyles.headerRow}>
-              <Text style={[hfStyles.headerCell, { width: 38 }]}>Rnd</Text>
-              <Text style={[hfStyles.headerCell, { width: 82 }]}>Opponent</Text>
+              <Text style={[hfStyles.headerCell, { width: 34 }]}>Rnd</Text>
+              <Text style={[hfStyles.headerCell, { width: 76 }]}>Opponent</Text>
               <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
+              <Text style={[hfStyles.headerCell, { width: 68, textAlign: 'right' }]}>Proj $</Text>
             </View>
             {fixtures.length === 0 ? (
               <Text style={hfStyles.empty}>No remaining fixtures</Text>
             ) : fixtures.map(m => {
-              const isHome   = m.homeTeam === player.team.name;
+              const isHome    = m.homeTeam === player.team.name;
               const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
+              const proj      = projectedPrices[m.round];
+              const projColor = !proj ? COLORS.textMuted
+                : proj.delta > 0 ? COLORS.success
+                : proj.delta < 0 ? COLORS.danger
+                : COLORS.textMuted;
               return (
                 <View key={m.round} style={hfStyles.row}>
-                  <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
-                  <Text style={[hfStyles.cell, { width: 82, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                  <Text style={[hfStyles.cell, { width: 34, textAlign: 'center' }]}>{m.round}</Text>
+                  <Text style={[hfStyles.cell, { width: 76, textAlign: 'center' }]}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
+                  <View style={{ width: 68, alignItems: 'flex-end' }}>
+                    {proj ? (
+                      <>
+                        <Text style={[hfStyles.cell, { color: projColor, fontWeight: '700' }]}>
+                          {formatPrice(proj.price)}
+                        </Text>
+                        <Text style={{ fontSize: 9, color: projColor }}>
+                          {proj.delta >= 0 ? '+' : ''}{formatPriceChange(proj.delta)}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[hfStyles.cell, { color: COLORS.textMuted }]}>-</Text>
+                    )}
+                  </View>
                 </View>
               );
             })}

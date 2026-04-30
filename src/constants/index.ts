@@ -96,6 +96,12 @@ export const CURRENT_YEAR = 2026;
 export const CURRENT_ROUND = 3;
 export const HISTORICAL_YEARS = [2025, 2024, 2023];
 
+// SuperCoach price-change divisor for the 2026 season.
+// Formula: priceChange = (score - breakeven) × (price / SC_PRICE_DIVISOR)
+// Meaning: 1 point above/below BE = price / SC_PRICE_DIVISOR dollars gained/lost.
+// Reverse-engineered from Footywire expected-price data; shifts slightly each season.
+export const SC_PRICE_DIVISOR = 1287;
+
 // AFL team colours keyed by full team name (as returned by the API).
 // colors: 2 or 3 sections. direction: 'v' = vertical split (default), 'h' = horizontal bands.
 export const TEAM_COLORS: Record<string, { colors: string[]; direction?: 'h' | 'v' }> = {
