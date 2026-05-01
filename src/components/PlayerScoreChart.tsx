@@ -73,7 +73,7 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
       // Prefer fetched price-derived BE; fall back to 3-game window only when ppts is known
       if (perRoundBE?.[r] !== undefined) {
         beByRound.set(r, perRoundBE[r]);
-      } else if (ppts > 0) {
+      } else if (ppts !== 0) {
         const be = idx >= 3
           ? perRoundScores[playedOnly[idx - 3]]
           : idx > 0
@@ -85,11 +85,11 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
 
     // Walk forward: carry the last known BE; emit null until the first data point.
     // For rounds AFTER the last played round (upcoming), show the current published
-    // ppts directly — do not carry forward the previous round's computed BE.
-    let last: number | null = ppts > 0 ? ppts : null;
+    // ppts directly — handles both positive and negative BEs.
+    let last: number | null = ppts !== 0 ? ppts : null;
     return allRounds.map(r => {
       if (beByRound.has(r)) last = beByRound.get(r)!;
-      if (r > lastPlayedRound && ppts > 0) return ppts;
+      if (r > lastPlayedRound && ppts !== 0) return ppts;
       return last;
     });
   }, [allRounds, perRoundScores, perRoundBE, ppts]);

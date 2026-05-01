@@ -898,7 +898,7 @@ async function fetchPlayerRoundBEs(
     if (i === lastScoredIdx) {
       // Last played round: anchor to the published current BE rather than using
       // the formula (which would need the upcoming round's price and is unreliable).
-      if (currentBE > 0) result[curr.round] = currentBE;
+      if (currentBE !== 0) result[curr.round] = currentBE;
     } else {
       // All earlier rounds: derive BE from the actual price change that followed.
       // roundData[i+1].price is valid even when round i+1 has no score (bye/DNP).

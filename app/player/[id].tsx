@@ -86,7 +86,7 @@ export default function PlayerDetailScreen() {
   const ppts = fwPlayer?.breakeven ?? stats.ppts ?? 0;
   const likelihood = fwPlayer?.likelihood ?? null;
   const avg3 = stats.avg3 ?? 0;
-  const beStatus = ppts === 0 ? 'unknown' : ppts > avg3 * 1.15 ? 'danger' : ppts > avg3 ? 'warning' : 'safe';
+  const beStatus = ppts === 0 ? 'unknown' : ppts < 0 ? 'safe' : ppts > avg3 * 1.15 ? 'danger' : ppts > avg3 ? 'warning' : 'safe';
 
   const avg = stats.avg ?? 0;
   const avg5 = roundScores?.avg5 ?? 0;
@@ -224,7 +224,7 @@ export default function PlayerDetailScreen() {
       </View>
 
       {/* Breakeven section */}
-      {ppts > 0 ? (
+      {ppts !== 0 ? (
         <View style={[
           styles.beSection,
           beStatus === 'danger' ? styles.beDanger :
@@ -243,12 +243,14 @@ export default function PlayerDetailScreen() {
             </View>
             <View style={styles.beRight}>
               <Text style={styles.beContext}>
-                {beStatus === 'danger'
+                {ppts < 0
+                  ? `BE below zero — price rising regardless`
+                  : beStatus === 'danger'
                   ? `Needs ${ppts} pts to stop price drop — ${ppts - avg3 > 0 ? `${(ppts - avg3).toFixed(0)} above` : 'at'} 3 Rd Avg`
                   : beStatus === 'warning'
                   ? `Slightly above 3 Rd Avg (${avg3.toFixed(0)}) — price may dip`
                   : `Below 3 Rd Avg (${avg3.toFixed(0)}) — price rising`}
-                {likelihood !== null ? `\nLikelihood of hitting BE: ${likelihood}%` : ''}
+                {likelihood !== null && ppts > 0 ? `\nLikelihood of hitting BE: ${likelihood}%` : ''}
               </Text>
               <View style={[
                 styles.bePill,
