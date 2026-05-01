@@ -109,32 +109,31 @@ export default function PlayerDetailScreen() {
     .map(Number)
     .filter(r => perRoundScores[r] > 0)
     .sort((a, b) => a - b);
-  const padScore = avg > 0 ? avg : avg3;
+  // SC's "Points Proj." is avg3 — use it as the seed for the rolling window
+  const padScore = avg3 > 0 ? avg3 : avg;
   const rollingWindow: number[] = sortedPlayedRounds.slice(-3).map(r => perRoundScores[r]);
   while (rollingWindow.length < 3) rollingWindow.unshift(padScore);
 
-  const projectedPrices: Record<number, { price: number; delta: number }> = {};
+  const projectedPrices: Record<number, { price: number; delta: number; projScore: number }> = {};
   const basePrice = stats.price ?? 0;
   if (ppts > 0 && basePrice > 0) {
     let chainPrice = basePrice;
     let chainBE = ppts;
     for (const m of fixtures) {
-      // Rolling avg replaces the static projScore as our per-round estimate
+      // Rolling avg is the primary projection — mirrors SC's avg3-based "Points Proj."
       const rollingAvg = rollingWindow.reduce((a, b) => a + b, 0) / rollingWindow.length;
 
-      // Blend opp/venue context on top of the rolling avg.
-      // Opponent history is weighted heavily so round-to-round variation reflects
-      // actual matchup difficulty — a tough opponent historically lowers the projection
-      // below BE even for high-scoring players, creating realistic price dips.
+      // Nudge with opp/venue context only when there's enough historical data (≥3 games).
+      // Thin samples (1-2 games) are noise — pure rolling avg is more reliable.
       const fp = fixtureProjections[m.round];
       const oppAvg = fp?.oppAvg ?? 0;
       const venueAvg = fp?.venueAvg ?? 0;
-      const useOpp = (fp?.oppGames ?? 0) >= 2;
-      const useVenue = (fp?.venueGames ?? 0) >= 2;
+      const useOpp = (fp?.oppGames ?? 0) >= 3;
+      const useVenue = (fp?.venueGames ?? 0) >= 3;
       let projScore: number;
-      if (useOpp && useVenue) projScore = oppAvg * 0.5 + venueAvg * 0.2 + rollingAvg * 0.3;
-      else if (useOpp)         projScore = oppAvg * 0.6 + rollingAvg * 0.4;
-      else if (useVenue)       projScore = venueAvg * 0.5 + rollingAvg * 0.5;
+      if (useOpp && useVenue) projScore = rollingAvg * 0.65 + oppAvg * 0.25 + venueAvg * 0.10;
+      else if (useOpp)         projScore = rollingAvg * 0.75 + oppAvg * 0.25;
+      else if (useVenue)       projScore = rollingAvg * 0.85 + venueAvg * 0.15;
       else                     projScore = rollingAvg;
 
       // Advance the window: drop oldest score, push this round's projection
@@ -145,7 +144,7 @@ export default function PlayerDetailScreen() {
       chainPrice = Math.max(0, chainPrice + change);
       // BE scales linearly with price — if price rises 10%, you need 10% more points to hold it
       chainBE = ppts * (chainPrice / basePrice);
-      projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - basePrice };
+      projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - basePrice, projScore: Math.round(projScore) };
     }
   }
 
@@ -382,6 +381,7 @@ export default function PlayerDetailScreen() {
               <Text style={[hfStyles.headerCell, { width: 34 }]}>Rnd</Text>
               <Text style={[hfStyles.headerCell, { width: 76 }]}>Opponent</Text>
               <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
+              <Text style={[hfStyles.headerCell, { width: 54, textAlign: 'right' }]}>Proj Pts</Text>
               <Text style={[hfStyles.headerCell, { width: 68, textAlign: 'right' }]}>Proj $</Text>
             </View>
             {fixtures.length === 0 ? (
@@ -403,6 +403,9 @@ export default function PlayerDetailScreen() {
                     <Text style={hfStyles.cell}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
                   </View>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
+                  <Text style={[hfStyles.cell, { width: 54, textAlign: 'right', color: COLORS.warning, fontWeight: '700' }]}>
+                    {proj ? proj.projScore : '-'}
+                  </Text>
                   <View style={{ width: 68, alignItems: 'flex-end' }}>
                     {proj ? (
                       <>

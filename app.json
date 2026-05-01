@@ -14,7 +14,8 @@
       "backgroundColor": "#0a0e1a"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ethanfang21.SuperCoachNuffies"
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +23,8 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ethanfang21.SuperCoachNuffies"
     },
     "web": {
       "favicon": "./assets/favicon.png"

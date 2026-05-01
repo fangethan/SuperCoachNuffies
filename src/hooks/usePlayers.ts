@@ -169,7 +169,7 @@ export function usePlayerRoundBEs(player: Player | undefined, year: number, ppts
     queryFn: () => footywireApi.fetchPlayerRoundBEs(
       player!.first_name, player!.last_name, player!.team.name, year, ppts,
     ),
-    enabled: !!(player && ppts > 0),
+    enabled: !!player,
     staleTime: 1000 * 60 * 30,
   });
 }

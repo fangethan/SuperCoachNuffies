@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import {
   View, Text, FlatList, StyleSheet,
-  ActivityIndicator, TouchableOpacity, ScrollView,
+  ActivityIndicator, TouchableOpacity,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePlayers, useByeRounds } from '../../src/hooks/usePlayers';
@@ -76,7 +76,7 @@ export default function TradesScreen() {
 
       {/* Position filter (trade in only) */}
       {tab === 'in' && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.posRow}>
+        <View style={styles.posRow}>
           {POSITIONS_FILTER.map(pos => {
             const active = posFilter === pos;
             const color = pos === 'ALL' ? COLORS.primary : POSITIONS[pos as keyof typeof POSITIONS]?.color;
@@ -90,7 +90,7 @@ export default function TradesScreen() {
               </TouchableOpacity>
             );
           })}
-        </ScrollView>
+        </View>
       )}
 
       <FlatList
@@ -171,9 +171,9 @@ const styles = StyleSheet.create({
   },
   syncNoteText: { fontSize: 12, color: COLORS.warning, textAlign: 'center' },
   syncNoteLink: { fontSize: 12, color: COLORS.warning, textAlign: 'center', fontWeight: '700', marginTop: 4 },
-  posRow: { marginBottom: 10, flexGrow: 0 },
+  posRow: { flexDirection: 'row', marginBottom: 12, paddingVertical: 2 },
   posPill: {
-    paddingHorizontal: 14, paddingVertical: 6,
+    paddingHorizontal: 14, paddingVertical: 7,
     borderRadius: 20, borderWidth: 1,
     borderColor: COLORS.border, marginRight: 8,
   },

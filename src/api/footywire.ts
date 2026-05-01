@@ -66,7 +66,7 @@ function resolveTeam(raw: string): Team {
 // ─── Name helpers ─────────────────────────────────────────────────────────────
 
 export function normaliseName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
+  return name.toLowerCase().replace(/-/g, ' ').replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
 function splitName(full: string): { firstName: string; lastName: string } {
@@ -890,8 +890,9 @@ async function fetchPlayerRoundBEs(
     if (i + 1 < roundData.length) {
       const priceChange = roundData[i + 1].price - curr.price;
       result[curr.round] = Math.round(curr.score - (priceChange * 1287 / curr.price));
-    } else {
+    } else if (currentBE > 0) {
       result[curr.round] = currentBE; // last played round → use published ppts
+      // When currentBE = 0 (not yet established), skip rather than emit a wrong 0
     }
   }
   return result;
