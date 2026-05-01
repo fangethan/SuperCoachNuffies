@@ -16,7 +16,7 @@ export default function PlayerDetailScreen() {
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, maxRound, players ?? []);
+  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, Math.max(1, maxRound - 1), players ?? []);
   const { data: matchList } = useMatchList(CURRENT_YEAR);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
 
