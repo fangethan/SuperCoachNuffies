@@ -12,11 +12,11 @@ import { PlayerScoreChart } from '../../src/components/PlayerScoreChart';
 
 export default function PlayerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const currentRound = useAppStore(s => s.currentRound);
-  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
+  const maxRound = useAppStore(s => s.maxRound);
+  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, currentRound, players ?? []);
+  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, maxRound, players ?? []);
   const { data: matchList } = useMatchList(CURRENT_YEAR);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
 
@@ -24,6 +24,7 @@ export default function PlayerDetailScreen() {
   const stats = player?.player_stats?.[0];
   const playerId = player ? player.id : 0;
   const roundScores = roundScoresById[playerId];
+  const lastCompletedRound = Math.max(1, maxRound - 1);
   const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
 
   // Hoist fwPlayer + ppts before hooks so they can be passed as arguments
@@ -70,7 +71,7 @@ export default function PlayerDetailScreen() {
   const weeklyPriceChange = stats.price_change ?? 0;
   const priceDir = getPriceDirection(weeklyPriceChange);
   const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
-  const futureByeRounds = allByeRounds.filter(r => r > currentRound);
+  const futureByeRounds = allByeRounds.filter(r => r > maxRound);
 
   const fwPlayer = fwMap ? footywireApi.lookupPlayer(fwMap, player.first_name, player.last_name) : undefined;
 
@@ -195,7 +196,7 @@ export default function PlayerDetailScreen() {
 
       {/* Key stats row */}
       <View style={styles.statsGrid}>
-        <StatBox label="Last Round" value={lastRoundScore} large />
+        <StatBox label={`Rnd ${lastCompletedRound}`} value={lastRoundScore} large />
         <StatBox label="Season Avg" value={avg.toFixed(1)} large />
         <StatBox label="3 Rd Avg" value={avg3 > 0 ? avg3.toFixed(1) : 'N/A'} large />
         <StatBox label="5 Rd Avg" value={avg5 > 0 ? avg5.toFixed(1) : 'N/A'} large />

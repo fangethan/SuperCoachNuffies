@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
+  Modal, ScrollView, Pressable,
 } from 'react-native';
 import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
@@ -38,15 +39,14 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
 };
 
 export default function PlayersScreen() {
-  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, currentRound, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
+  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
 
-  const isHistorical = currentRound < maxRound;
+  // Local round state — only used for "Rnd X Pts" sort, nothing else
+  const lastCompletedRound = Math.max(1, maxRound - 1);
+  const [scoreRound, setScoreRound] = useState(lastCompletedRound);
+  const [roundModalOpen, setRoundModalOpen] = useState(false);
 
-  // scoreRound: for historical picks use that round directly; for the live round
-  // use maxRound-1 (the last fully completed round).
-  const scoreRound = isHistorical ? currentRound : Math.max(1, maxRound - 1);
-
-  const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, currentRound);
+  const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
 
@@ -116,13 +116,6 @@ export default function PlayersScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Round indicator */}
-      <View style={styles.roundRow}>
-        <Text style={styles.roundLabel}>Round {currentRound}</Text>
-        <View style={[styles.roundDot, isHistorical && styles.roundDotHistorical]} />
-        <Text style={styles.roundSub}>{isHistorical ? 'Historical' : 'Live data'}</Text>
-      </View>
-
       {/* Search */}
       <TextInput
         style={styles.search}
@@ -151,18 +144,25 @@ export default function PlayersScreen() {
 
       {/* Sort options + direction toggle */}
       <View style={styles.sortRow}>
-        {SORT_OPTIONS.map(opt => (
-          <TouchableOpacity
-            key={opt.value}
-            activeOpacity={0.8}
-            style={[styles.sortPill, sortBy === opt.value && styles.sortActive]}
-            onPress={() => setSortBy(opt.value)}
-          >
-            <Text style={[styles.sortLabel, sortBy === opt.value && styles.sortLabelActive]}>
-              {opt.value === 'points' ? `Rnd ${scoreRound} Pts` : opt.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {SORT_OPTIONS.map(opt => {
+          const isPoints = opt.value === 'points';
+          const active = sortBy === opt.value;
+          return (
+            <TouchableOpacity
+              key={opt.value}
+              activeOpacity={0.8}
+              style={[styles.sortPill, active && styles.sortActive]}
+              onPress={() => {
+                setSortBy(opt.value);
+                if (isPoints) setRoundModalOpen(true);
+              }}
+            >
+              <Text style={[styles.sortLabel, active && styles.sortLabelActive]}>
+                {isPoints ? `Rnd ${scoreRound} Pts ▾` : opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
         <TouchableOpacity
           activeOpacity={0.8}
           style={[styles.sortPill, styles.sortDirBtn]}
@@ -171,6 +171,31 @@ export default function PlayersScreen() {
           <Text style={styles.sortDirLabel}>{sortAscending ? '↑' : '↓'}</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Round picker modal — only for "Rnd X Pts" sort */}
+      <Modal visible={roundModalOpen} transparent animationType="fade" onRequestClose={() => setRoundModalOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setRoundModalOpen(false)}>
+          <Pressable style={styles.modalSheet} onPress={e => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Select Round</Text>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ flexGrow: 0 }}>
+              {Array.from({ length: lastCompletedRound }, (_, i) => lastCompletedRound - i).map(r => {
+                const active = r === scoreRound;
+                return (
+                  <TouchableOpacity
+                    key={r}
+                    style={[styles.modalItem, active && styles.modalItemActive]}
+                    onPress={() => { setScoreRound(r); setRoundModalOpen(false); }}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.modalItemText, active && styles.modalItemTextActive]}>Round {r}</Text>
+                    {active && <Text style={styles.modalCheck}>✓</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Text style={styles.count}>
         {filtered.length} players{roundScoresLoading && (sortBy === 'points' || sortBy === 'avg5') ? ' • loading scores…' : ''}
@@ -201,30 +226,6 @@ const styles = StyleSheet.create({
   centre: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background },
   loadingText: { color: COLORS.textSecondary, marginTop: 12, fontSize: 15 },
   errorText: { color: COLORS.danger, textAlign: 'center', padding: 20 },
-  roundRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  roundLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  roundDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: COLORS.success,
-    marginHorizontal: 6,
-  },
-  roundDotHistorical: {
-    backgroundColor: COLORS.warning,
-  },
-  roundSub: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-  },
   search: {
     backgroundColor: COLORS.surface,
     borderRadius: 10,
@@ -261,4 +262,41 @@ const styles = StyleSheet.create({
   ownedToggleActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
   ownedToggleLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
   ownedToggleLabelActive: { color: COLORS.primary },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSheet: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    width: 220,
+    maxHeight: 420,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+  },
+  modalItemActive: { backgroundColor: COLORS.primary + '18' },
+  modalItemText: { fontSize: 15, fontWeight: '600', color: COLORS.textSecondary },
+  modalItemTextActive: { color: COLORS.primary },
+  modalCheck: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
 });
