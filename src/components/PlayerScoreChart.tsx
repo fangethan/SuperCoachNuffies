@@ -67,6 +67,7 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
   // Returns null for rounds before the first known BE (avoids misleading stagnant 0s).
   const bePerRound = useMemo(() => {
     const playedOnly = allRounds.filter(r => perRoundScores[r] > 0);
+    const lastPlayedRound = playedOnly.length > 0 ? playedOnly[playedOnly.length - 1] : -1;
     const beByRound = new Map<number, number>();
     playedOnly.forEach((r, idx) => {
       // Prefer fetched price-derived BE; fall back to 3-game window only when ppts is known
@@ -82,10 +83,13 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
       }
     });
 
-    // Walk forward: carry the last known BE; emit null until the first data point
+    // Walk forward: carry the last known BE; emit null until the first data point.
+    // For rounds AFTER the last played round (upcoming), show the current published
+    // ppts directly — do not carry forward the previous round's computed BE.
     let last: number | null = ppts > 0 ? ppts : null;
     return allRounds.map(r => {
       if (beByRound.has(r)) last = beByRound.get(r)!;
+      if (r > lastPlayedRound && ppts > 0) return ppts;
       return last;
     });
   }, [allRounds, perRoundScores, perRoundBE, ppts]);

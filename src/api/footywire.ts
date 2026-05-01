@@ -883,16 +883,27 @@ async function fetchPlayerRoundBEs(
 
   roundData.sort((a, b) => a.round - b.round);
 
+  // Find the index of the last row that actually has a score (null-score rows are
+  // price-only entries for byes or the upcoming unplayed round).
+  let lastScoredIdx = -1;
+  for (let i = roundData.length - 1; i >= 0; i--) {
+    if (roundData[i].score !== null) { lastScoredIdx = i; break; }
+  }
+
   const result: Record<number, number> = {};
   for (let i = 0; i < roundData.length; i++) {
     const curr = roundData[i];
     if (curr.score === null) continue;
-    if (i + 1 < roundData.length) {
+
+    if (i === lastScoredIdx) {
+      // Last played round: anchor to the published current BE rather than using
+      // the formula (which would need the upcoming round's price and is unreliable).
+      if (currentBE > 0) result[curr.round] = currentBE;
+    } else {
+      // All earlier rounds: derive BE from the actual price change that followed.
+      // roundData[i+1].price is valid even when round i+1 has no score (bye/DNP).
       const priceChange = roundData[i + 1].price - curr.price;
       result[curr.round] = Math.round(curr.score - (priceChange * 1287 / curr.price));
-    } else if (currentBE > 0) {
-      result[curr.round] = currentBE; // last played round → use published ppts
-      // When currentBE = 0 (not yet established), skip rather than emit a wrong 0
     }
   }
   return result;
