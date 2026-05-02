@@ -146,38 +146,52 @@ export default function PlayersScreen() {
         <PositionFilterBar />
       </View>
 
-      {/* Sort options + direction toggle */}
+      {/* Sort row: horizontal scroll + direction toggle pinned right */}
       <View style={styles.sortRow}>
-        {SORT_OPTIONS.map(opt => {
-          const isPoints = opt.value === 'points';
-          const active = sortBy === opt.value;
-          return (
-            <TouchableOpacity
-              key={opt.value}
-              activeOpacity={0.8}
-              style={[styles.sortPill, active && styles.sortActive]}
-              onPress={() => {
-                setSortBy(opt.value);
-                if (isPoints) setRoundModalOpen(true);
-              }}
-            >
-              <Text style={[styles.sortLabel, active && styles.sortLabelActive]}>
-                {isPoints ? `Rnd ${scoreRound} Pts ▾` : opt.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.sortScroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {SORT_OPTIONS.map(opt => {
+            const isPoints = opt.value === 'points';
+            const active = sortBy === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                activeOpacity={0.8}
+                style={[styles.sortPill, active && styles.sortActive]}
+                onPress={() => {
+                  setSortBy(opt.value);
+                  if (isPoints) setRoundModalOpen(true);
+                }}
+              >
+                <Text style={[styles.sortLabel, active && styles.sortLabelActive]}>
+                  {isPoints ? `Rnd ${scoreRound} Pts ▾` : opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
         <TouchableOpacity
           activeOpacity={0.8}
-          style={[styles.sortPill, styles.sortDirBtn]}
+          style={styles.sortDirBtn}
           onPress={toggleSortDirection}
         >
           <Text style={styles.sortDirLabel}>{sortAscending ? '↑' : '↓'}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Filter chips: My Team + <3 matches */}
+      {/* Filter chips row: <3 matches + My Team */}
       <View style={styles.chipRow}>
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[styles.chip, showBubbleOnly && styles.chipBubbleActive]}
+          onPress={() => setShowBubbleOnly(!showBubbleOnly)}
+        >
+          <Text style={[styles.chipLabel, showBubbleOnly && styles.chipBubbleLabelActive]}>{'<3 matches'}</Text>
+        </TouchableOpacity>
         {myTeamIds.length > 0 ? (
           <TouchableOpacity
             activeOpacity={0.8}
@@ -187,13 +201,6 @@ export default function PlayersScreen() {
             <Text style={[styles.chipLabel, showOwnedOnly && styles.chipLabelActive]}>My Team</Text>
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={[styles.chip, showBubbleOnly && styles.chipBubbleActive]}
-          onPress={() => setShowBubbleOnly(!showBubbleOnly)}
-        >
-          <Text style={[styles.chipLabel, showBubbleOnly && styles.chipBubbleLabelActive]}>{'<3 matches'}</Text>
-        </TouchableOpacity>
       </View>
 
       {/* Round picker modal — only for "Rnd X Pts" sort */}
@@ -287,20 +294,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  sortRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 8, marginTop: 4 },
+  sortRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  sortScroll: { paddingRight: 8 },
   sortPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.border,
     marginRight: 6,
-    marginBottom: 6,
   },
   sortActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
   sortLabel: { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
   sortLabelActive: { color: COLORS.primary },
-  sortDirBtn: { borderColor: COLORS.border, minWidth: 36, alignItems: 'center' },
+  sortDirBtn: {
+    width: 34, height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
+    flexShrink: 0,
+  },
   sortDirLabel: { fontSize: 14, color: COLORS.textSecondary, fontWeight: '700' },
   count: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
   list: { paddingBottom: 20 },
