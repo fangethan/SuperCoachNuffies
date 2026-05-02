@@ -42,6 +42,9 @@
           "photosPermission": "Pick a screenshot of your SuperCoach team so the app can read your players."
         }
       ]
-    ]
+    ],
+    "developmentClient": {
+      "silentLaunch": true
+    }
   }
 }

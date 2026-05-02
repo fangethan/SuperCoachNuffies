@@ -1,10 +1,11 @@
 import { Stack } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { COLORS, CURRENT_YEAR } from '../src/constants';
 import { useAppStore } from '../src/store/useAppStore';
 import { useCurrentRound } from '../src/hooks/useCurrentRound';
+import { AnimatedSplash } from '../src/components/AnimatedSplash';
 
 const queryClient = new QueryClient();
 
@@ -37,6 +38,10 @@ function RoundSync() {
 }
 
 export default function RootLayout() {
+  // Show the animated splash on cold start. Once its sequence runs through,
+  // it calls onFinish and the overlay unmounts to reveal the real app.
+  const [splashDone, setSplashDone] = useState(false);
+
   return (
     <QueryClientProvider client={queryClient}>
       <StatusBar style="light" />
@@ -56,6 +61,7 @@ export default function RootLayout() {
           options={{ title: 'Player', headerBackTitle: 'Back' }}
         />
       </Stack>
+      {!splashDone && <AnimatedSplash onFinish={() => setSplashDone(true)} />}
     </QueryClientProvider>
   );
 }
