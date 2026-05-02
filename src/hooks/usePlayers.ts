@@ -75,9 +75,10 @@ export function useFilteredPlayers(
   fwBreakevenById: Record<number, number> = {},
   roundScoresById: Record<number, PlayerRoundScores> = {},
   roundScoresLoading = false,
-  scoreRound = 0,  // specific round for 'points' sort; 0 = use lastScore
+  scoreRound = 0,
+  byeMap: Record<string, number[]> = {},
 ) {
-  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, showBubbleOnly, myTeamIds } = useAppStore();
+  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, showBubbleOnly, myTeamIds, priceMin, priceMax, byeRoundFilters } = useAppStore();
 
   const getRoundScore = (id: number) =>
     scoreRound > 0
@@ -92,6 +93,24 @@ export function useFilteredPlayers(
 
   if (showBubbleOnly) {
     filtered = filtered.filter(p => (p.player_stats?.[0]?.games ?? 0) <= 2);
+  }
+
+  // Price range — values in $k (floats); player prices are in dollars
+  if (priceMin > 95.0 || priceMax < 750.0) {
+    filtered = filtered.filter(p => {
+      const priceK = (p.player_stats?.[0]?.price ?? 0) / 1000;
+      const passMin = priceMin <= 95.0  || priceK >= priceMin;
+      const passMax = priceMax >= 750.0 || priceK <= priceMax;
+      return passMin && passMax;
+    });
+  }
+
+  // Bye round — filter OUT players whose team is on bye in any selected round
+  if (byeRoundFilters.length > 0 && Object.keys(byeMap).length > 0) {
+    filtered = filtered.filter(p => {
+      const teamByes = byeMap[p.team?.name ?? ''] ?? [];
+      return !byeRoundFilters.some(r => teamByes.includes(r));
+    });
   }
 
   if (positionFilter !== 'ALL') {

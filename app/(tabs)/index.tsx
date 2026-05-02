@@ -10,9 +10,13 @@ import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { footywireApi } from '../../src/api/footywire';
 import { PlayerCard } from '../../src/components/PlayerCard';
 import { PositionFilterBar } from '../../src/components/PositionFilter';
+import { PriceRangeSlider } from '../../src/components/PriceRangeSlider';
 import { useAppStore } from '../../src/store/useAppStore';
 import { COLORS, CURRENT_YEAR } from '../../src/constants';
 import { SortOption, Player } from '../../src/types';
+
+const PRICE_MIN = 95.0;   // $k
+const PRICE_MAX = 750.0;  // $k
 
 const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'Total Pts', value: 'total_pts' },
@@ -42,13 +46,24 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
 const SEASON_YEARS = [2026, 2025, 2024];
 
 export default function PlayersScreen() {
-  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly, showBubbleOnly, setShowBubbleOnly, selectedYear, setSelectedYear } = useAppStore();
+  const {
+    searchQuery, setSearchQuery,
+    sortBy, setSortBy, sortAscending, toggleSortDirection,
+    maxRound, myTeamIds,
+    showOwnedOnly, setShowOwnedOnly,
+    showBubbleOnly, setShowBubbleOnly,
+    selectedYear, setSelectedYear,
+    priceMin, priceMax, setPriceMin, setPriceMax,
+    byeRoundFilters, toggleByeRoundFilter,
+    resetFilters,
+  } = useAppStore();
 
   // Local round state — only used for "Rnd X Pts" sort, nothing else
   const lastCompletedRound = Math.max(1, maxRound - 1);
   const [scoreRound, setScoreRound] = useState(lastCompletedRound);
   const [roundModalOpen, setRoundModalOpen] = useState(false);
   const [yearModalOpen, setYearModalOpen] = useState(false);
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
 
   const navigation = useNavigation();
   useEffect(() => {
@@ -90,7 +105,17 @@ export default function PlayersScreen() {
   // Fetch scores through scoreRound (the specific round being viewed)
   const { data: roundScoresById, isLoading: roundScoresLoading } = useRoundScores(CURRENT_YEAR, scoreRound, players ?? []);
 
-  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading, scoreRound);
+  const allByeRounds = useMemo(() => {
+    if (!byeMap) return [] as number[];
+    const rounds = new Set<number>();
+    Object.values(byeMap).forEach(rds => rds.forEach(r => rounds.add(r)));
+    return Array.from(rounds).sort((a, b) => a - b);
+  }, [byeMap]);
+
+  const hasActiveFilters = showBubbleOnly
+    || priceMin > PRICE_MIN || priceMax < PRICE_MAX || byeRoundFilters.length > 0;
+
+  const filtered = useFilteredPlayers(players ?? [], weeklyPriceMap, fwBreakevenById, roundScoresById, roundScoresLoading, scoreRound, byeMap ?? {});
 
   // Memoised render for FlatList performance
   const renderItem = useCallback(({ item, index }: { item: Player; index: number }) => {
@@ -183,15 +208,8 @@ export default function PlayersScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Filter chips row: <3 matches + My Team */}
+      {/* Filter chips row */}
       <View style={styles.chipRow}>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={[styles.chip, showBubbleOnly && styles.chipBubbleActive]}
-          onPress={() => setShowBubbleOnly(!showBubbleOnly)}
-        >
-          <Text style={[styles.chipLabel, showBubbleOnly && styles.chipBubbleLabelActive]}>{'<3 matches'}</Text>
-        </TouchableOpacity>
         {myTeamIds.length > 0 ? (
           <TouchableOpacity
             activeOpacity={0.8}
@@ -201,7 +219,98 @@ export default function PlayersScreen() {
             <Text style={[styles.chipLabel, showOwnedOnly && styles.chipLabelActive]}>My Team</Text>
           </TouchableOpacity>
         ) : null}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[styles.chip, hasActiveFilters && styles.chipFiltersActive]}
+          onPress={() => setFilterModalOpen(true)}
+        >
+          <Text style={[styles.chipLabel, hasActiveFilters && styles.chipFiltersLabelActive]}>
+            {`Filters${hasActiveFilters ? ' •' : ''}`}
+          </Text>
+        </TouchableOpacity>
       </View>
+
+      {/* Advanced filter bottom sheet */}
+      <Modal visible={filterModalOpen} transparent animationType="slide" onRequestClose={() => setFilterModalOpen(false)}>
+        <Pressable style={styles.filterOverlay} onPress={() => setFilterModalOpen(false)}>
+          <Pressable style={styles.filterSheet} onPress={e => e.stopPropagation()}>
+            {/* Handle */}
+            <View style={styles.filterHandle} />
+
+            <View style={styles.filterHeader}>
+              <Text style={styles.filterTitle}>Filters</Text>
+              <TouchableOpacity onPress={() => { resetFilters(); }} activeOpacity={0.7}>
+                <Text style={styles.filterReset}>Reset All</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* <3 matches toggle */}
+            <View style={styles.filterSection}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.filterToggleRow}
+                onPress={() => setShowBubbleOnly(!showBubbleOnly)}
+              >
+                <View>
+                  <Text style={styles.filterToggleLabel}>{'<3 Matches played'}</Text>
+                  <Text style={styles.filterToggleSub}>Show only players early in their season</Text>
+                </View>
+                <View style={[styles.filterToggle, showBubbleOnly && styles.filterToggleOn]}>
+                  <View style={[styles.filterToggleKnob, showBubbleOnly && styles.filterToggleKnobOn]} />
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.filterDivider} />
+
+            {/* Price range */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>BY PRICE RANGE</Text>
+              <PriceRangeSlider
+                min={PRICE_MIN}
+                max={PRICE_MAX}
+                low={priceMin}
+                high={priceMax}
+                onLowChange={setPriceMin}
+                onHighChange={setPriceMax}
+              />
+            </View>
+
+            <View style={styles.filterDivider} />
+
+            {/* Bye round */}
+            {allByeRounds.length > 0 && (
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>TEAMS PLAYING — BYE ROUND</Text>
+                <Text style={styles.filterSectionSub}>Tap a round to hide players on bye</Text>
+                <View style={styles.byeRoundRow}>
+                  {allByeRounds.map(r => {
+                    const active = byeRoundFilters.includes(r);
+                    return (
+                      <TouchableOpacity
+                        key={r}
+                        activeOpacity={0.8}
+                        style={[styles.byeRoundPill, active && styles.byeRoundPillActive]}
+                        onPress={() => toggleByeRoundFilter(r)}
+                      >
+                        <Text style={[styles.byeRoundLabel, active && styles.byeRoundLabelActive]}>{r}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.filterDoneBtn}
+              onPress={() => setFilterModalOpen(false)}
+            >
+              <Text style={styles.filterDoneLabel}>Done</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Round picker modal — only for "Rnd X Pts" sort */}
       <Modal visible={roundModalOpen} transparent animationType="fade" onRequestClose={() => setRoundModalOpen(false)}>
@@ -333,11 +442,61 @@ const styles = StyleSheet.create({
     marginRight: 8, marginBottom: 6,
   },
   chipActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
-  chipBubbleActive: { backgroundColor: COLORS.warning + '22', borderColor: COLORS.warning },
+  chipFiltersActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
   chipLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
   chipLabelActive: { color: COLORS.primary },
-  chipBubbleLabelActive: { color: COLORS.warning },
+  chipFiltersLabelActive: { color: COLORS.primary },
   modalItemSub: { fontSize: 10, color: COLORS.textMuted, marginTop: 1 },
+
+  // Filter bottom sheet
+  filterOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  filterSheet: {
+    backgroundColor: COLORS.surface,
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: COLORS.border,
+    paddingHorizontal: 20, paddingBottom: 36,
+  },
+  filterHandle: {
+    alignSelf: 'center', width: 38, height: 4,
+    borderRadius: 2, backgroundColor: COLORS.border, marginTop: 10, marginBottom: 18,
+  },
+  filterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  filterTitle: { fontSize: 16, fontWeight: '800', color: COLORS.textPrimary },
+  filterReset: { fontSize: 13, fontWeight: '700', color: COLORS.danger },
+  filterSection: { marginBottom: 24 },
+  filterSectionTitle: {
+    fontSize: 11, fontWeight: '800', color: COLORS.textMuted,
+    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 16,
+  },
+  filterSectionSub: { fontSize: 11, color: COLORS.textMuted, marginTop: -10, marginBottom: 14 },
+  filterDivider: { height: 1, backgroundColor: COLORS.border, marginBottom: 24 },
+  filterToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  filterToggleLabel: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 2 },
+  filterToggleSub: { fontSize: 11, color: COLORS.textMuted },
+  filterToggle: {
+    width: 44, height: 26, borderRadius: 13,
+    backgroundColor: COLORS.border, justifyContent: 'center', paddingHorizontal: 2,
+  },
+  filterToggleOn: { backgroundColor: COLORS.primary },
+  filterToggleKnob: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2, shadowRadius: 2, elevation: 2,
+  },
+  filterToggleKnobOn: { alignSelf: 'flex-end' },
+  byeRoundRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  byeRoundPill: {
+    paddingHorizontal: 18, paddingVertical: 10,
+    borderRadius: 20, borderWidth: 1, borderColor: COLORS.border,
+  },
+  byeRoundPillActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
+  byeRoundLabel: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary },
+  byeRoundLabelActive: { color: COLORS.primary },
+  filterDoneBtn: {
+    backgroundColor: COLORS.primary, borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center', marginTop: 4,
+  },
+  filterDoneLabel: { fontSize: 15, fontWeight: '800', color: '#fff' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

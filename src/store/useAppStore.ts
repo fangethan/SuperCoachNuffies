@@ -39,6 +39,19 @@ interface AppState {
   selectedYear: number;
   setSelectedYear: (year: number) => void;
 
+  // Price range filter
+  priceMin: number;
+  priceMax: number;
+  setPriceMin: (v: number) => void;
+  setPriceMax: (v: number) => void;
+
+  // Bye round filter — exclude players with a bye in any selected round
+  byeRoundFilters: number[];
+  toggleByeRoundFilter: (r: number) => void;
+
+  // Reset all filters to defaults
+  resetFilters: () => void;
+
   // Auth token for SuperCoach personal features
   scAuthToken: string | null;
   setScAuthToken: (token: string | null) => void;
@@ -80,6 +93,30 @@ export const useAppStore = create<AppState>((set) => ({
 
   selectedYear: CURRENT_YEAR,
   setSelectedYear: (year) => set({ selectedYear: year }),
+
+  priceMin: 95.0,
+  priceMax: 750.0,
+  setPriceMin: (v) => set({ priceMin: v }),
+  setPriceMax: (v) => set({ priceMax: v }),
+
+  byeRoundFilters: [],
+  toggleByeRoundFilter: (r) => set(s => ({
+    byeRoundFilters: s.byeRoundFilters.includes(r)
+      ? s.byeRoundFilters.filter(x => x !== r)
+      : [...s.byeRoundFilters, r],
+  })),
+
+  resetFilters: () => set({
+    positionFilter: 'ALL',
+    sortBy: 'total_pts',
+    sortAscending: false,
+    searchQuery: '',
+    showOwnedOnly: false,
+    showBubbleOnly: false,
+    priceMin: 95.0,
+    priceMax: 750.0,
+    byeRoundFilters: [],
+  }),
 
   scAuthToken: null,
   setScAuthToken: (token) => set({ scAuthToken: token }),
