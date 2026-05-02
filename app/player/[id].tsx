@@ -16,7 +16,7 @@ export default function PlayerDetailScreen() {
   const { data: players, isLoading } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, Math.max(1, maxRound - 1), players ?? []);
+  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, maxRound, players ?? []);
   const { data: matchList } = useMatchList(CURRENT_YEAR);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
 
@@ -91,7 +91,7 @@ export default function PlayerDetailScreen() {
   const avg = stats.avg ?? 0;
   const avg5 = roundScores?.avg5 ?? 0;
 
-  const perRoundScores = roundScores?.roundScores ?? {};
+  const perRoundScoresRaw = roundScores?.roundScores ?? {};
   const teamMatches = matchList?.filter(
     m => m.homeTeam === player.team.name || m.awayTeam === player.team.name
   ) ?? [];
@@ -101,6 +101,13 @@ export default function PlayerDetailScreen() {
   const fixtures = [...teamMatches]
     .filter(m => m.homeScore === null)
     .sort((a, b) => a.round - b.round);
+
+  // Extend perRoundScores with the next upcoming round (score=0) so the
+  // projected BE dot for that round renders on the chart even before it's played.
+  const nextRound = fixtures[0]?.round;
+  const perRoundScores = nextRound && !perRoundScoresRaw[nextRound]
+    ? { ...perRoundScoresRaw, [nextRound]: 0 }
+    : perRoundScoresRaw;
 
   const sortedPlayedRounds = Object.keys(perRoundScores)
     .map(Number)

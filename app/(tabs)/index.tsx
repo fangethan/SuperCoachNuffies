@@ -1,9 +1,10 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, FlatList, TextInput,
   TouchableOpacity, StyleSheet, ActivityIndicator,
   Modal, ScrollView, Pressable,
 } from 'react-native';
+import { useNavigation } from 'expo-router';
 import { usePlayers, useByeRounds, useFilteredPlayers, useFootywireBreakevens, useMatchList } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { footywireApi } from '../../src/api/footywire';
@@ -38,13 +39,27 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
   ppts: 'Breakeven',
 };
 
+const SEASON_YEARS = [2026, 2025, 2024];
+
 export default function PlayersScreen() {
-  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly } = useAppStore();
+  const { searchQuery, setSearchQuery, sortBy, setSortBy, sortAscending, toggleSortDirection, maxRound, myTeamIds, showOwnedOnly, setShowOwnedOnly, showBubbleOnly, setShowBubbleOnly, selectedYear, setSelectedYear } = useAppStore();
 
   // Local round state — only used for "Rnd X Pts" sort, nothing else
   const lastCompletedRound = Math.max(1, maxRound - 1);
   const [scoreRound, setScoreRound] = useState(lastCompletedRound);
   const [roundModalOpen, setRoundModalOpen] = useState(false);
+  const [yearModalOpen, setYearModalOpen] = useState(false);
+
+  const navigation = useNavigation();
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity activeOpacity={0.8} onPress={() => setYearModalOpen(true)} style={{ marginRight: 16 }}>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }}>{selectedYear} ▾</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, selectedYear]);
 
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
@@ -126,20 +141,9 @@ export default function PlayersScreen() {
         clearButtonMode="while-editing"
       />
 
-      {/* Position filter + Owned toggle */}
+      {/* Position filter */}
       <View style={styles.filterRow}>
         <PositionFilterBar />
-        {myTeamIds.length > 0 ? (
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={[styles.ownedToggle, showOwnedOnly && styles.ownedToggleActive]}
-            onPress={() => setShowOwnedOnly(!showOwnedOnly)}
-          >
-            <Text style={[styles.ownedToggleLabel, showOwnedOnly && styles.ownedToggleLabelActive]}>
-              My Team
-            </Text>
-          </TouchableOpacity>
-        ) : null}
       </View>
 
       {/* Sort options + direction toggle */}
@@ -172,6 +176,26 @@ export default function PlayersScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Filter chips: My Team + <3 matches */}
+      <View style={styles.chipRow}>
+        {myTeamIds.length > 0 ? (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[styles.chip, showOwnedOnly && styles.chipActive]}
+            onPress={() => setShowOwnedOnly(!showOwnedOnly)}
+          >
+            <Text style={[styles.chipLabel, showOwnedOnly && styles.chipLabelActive]}>My Team</Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={[styles.chip, showBubbleOnly && styles.chipBubbleActive]}
+          onPress={() => setShowBubbleOnly(!showBubbleOnly)}
+        >
+          <Text style={[styles.chipLabel, showBubbleOnly && styles.chipBubbleLabelActive]}>{'<3 matches'}</Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Round picker modal — only for "Rnd X Pts" sort */}
       <Modal visible={roundModalOpen} transparent animationType="fade" onRequestClose={() => setRoundModalOpen(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setRoundModalOpen(false)}>
@@ -193,6 +217,33 @@ export default function PlayersScreen() {
                 );
               })}
             </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Year picker modal */}
+      <Modal visible={yearModalOpen} transparent animationType="fade" onRequestClose={() => setYearModalOpen(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setYearModalOpen(false)}>
+          <Pressable style={styles.modalSheet} onPress={e => e.stopPropagation()}>
+            <Text style={styles.modalTitle}>Season</Text>
+            {SEASON_YEARS.map(year => {
+              const active = year === selectedYear;
+              const isFuture = year !== 2026;
+              return (
+                <TouchableOpacity
+                  key={year}
+                  style={[styles.modalItem, active && styles.modalItemActive]}
+                  onPress={() => { setSelectedYear(year); setYearModalOpen(false); }}
+                  activeOpacity={0.7}
+                >
+                  <View>
+                    <Text style={[styles.modalItemText, active && styles.modalItemTextActive]}>{year}</Text>
+                    {isFuture && <Text style={styles.modalItemSub}>Coming soon</Text>}
+                  </View>
+                  {active && <Text style={styles.modalCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
           </Pressable>
         </Pressable>
       </Modal>
@@ -254,14 +305,18 @@ const styles = StyleSheet.create({
   count: { fontSize: 12, color: COLORS.textMuted, marginBottom: 8 },
   list: { paddingBottom: 20 },
   filterRow: { flexDirection: 'row', alignItems: 'center' },
-  ownedToggle: {
-    paddingHorizontal: 12, paddingVertical: 6,
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 6 },
+  chip: {
+    paddingHorizontal: 12, paddingVertical: 5,
     borderRadius: 20, borderWidth: 1, borderColor: COLORS.border,
-    marginLeft: 8, marginBottom: 8,
+    marginRight: 8, marginBottom: 6,
   },
-  ownedToggleActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
-  ownedToggleLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
-  ownedToggleLabelActive: { color: COLORS.primary },
+  chipActive: { backgroundColor: COLORS.primary + '22', borderColor: COLORS.primary },
+  chipBubbleActive: { backgroundColor: COLORS.warning + '22', borderColor: COLORS.warning },
+  chipLabel: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  chipLabelActive: { color: COLORS.primary },
+  chipBubbleLabelActive: { color: COLORS.warning },
+  modalItemSub: { fontSize: 10, color: COLORS.textMuted, marginTop: 1 },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',

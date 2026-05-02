@@ -77,7 +77,7 @@ export function useFilteredPlayers(
   roundScoresLoading = false,
   scoreRound = 0,  // specific round for 'points' sort; 0 = use lastScore
 ) {
-  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, myTeamIds } = useAppStore();
+  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, showBubbleOnly, myTeamIds } = useAppStore();
 
   const getRoundScore = (id: number) =>
     scoreRound > 0
@@ -88,6 +88,10 @@ export function useFilteredPlayers(
 
   if (showOwnedOnly && myTeamIds.length > 0) {
     filtered = filtered.filter(p => myTeamIds.includes(p.id));
+  }
+
+  if (showBubbleOnly) {
+    filtered = filtered.filter(p => (p.player_stats?.[0]?.games ?? 0) <= 2);
   }
 
   if (positionFilter !== 'ALL') {

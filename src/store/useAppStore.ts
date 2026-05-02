@@ -31,6 +31,14 @@ interface AppState {
   showOwnedOnly: boolean;
   setShowOwnedOnly: (v: boolean) => void;
 
+  // "On the bubble" filter — players with ≤2 games played
+  showBubbleOnly: boolean;
+  setShowBubbleOnly: (v: boolean) => void;
+
+  // Season year picker (UI only for now — 2024/2025/2026)
+  selectedYear: number;
+  setSelectedYear: (year: number) => void;
+
   // Auth token for SuperCoach personal features
   scAuthToken: string | null;
   setScAuthToken: (token: string | null) => void;
@@ -66,6 +74,12 @@ export const useAppStore = create<AppState>((set) => ({
 
   showOwnedOnly: false,
   setShowOwnedOnly: (v) => set({ showOwnedOnly: v }),
+
+  showBubbleOnly: false,
+  setShowBubbleOnly: (v) => set({ showBubbleOnly: v }),
+
+  selectedYear: CURRENT_YEAR,
+  setSelectedYear: (year) => set({ selectedYear: year }),
 
   scAuthToken: null,
   setScAuthToken: (token) => set({ scAuthToken: token }),
