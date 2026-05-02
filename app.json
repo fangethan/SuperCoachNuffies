@@ -11,16 +11,19 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0a0e1a"
+      "backgroundColor": "#0a1228"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ethanfang21.SuperCoachNuffies"
+      "bundleIdentifier": "com.ethanfang21.SuperCoachNuffies",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Pick a screenshot of your SuperCoach team so the app can read your players."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0a1228"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -32,7 +35,13 @@
     "plugins": [
       "expo-router",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pick a screenshot of your SuperCoach team so the app can read your players."
+        }
+      ]
     ]
   }
 }
