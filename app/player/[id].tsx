@@ -102,50 +102,75 @@ export default function PlayerDetailScreen() {
     .filter(m => m.homeScore === null)
     .sort((a, b) => a.round - b.round);
 
-  // Rolling 3-game window price chain — mirrors how Footywire calculates expected price.
-  // The window starts from the player's last 3 actual scores. Each projected round adds the
-  // projected score to the window and drops the oldest, so the rolling avg naturally zigzags
-  // (a monster game dropping off the window causes the avg to fall, creating a price dip).
   const sortedPlayedRounds = Object.keys(perRoundScores)
     .map(Number)
     .filter(r => perRoundScores[r] > 0)
     .sort((a, b) => a - b);
-  // SC's "Points Proj." is avg3 — use it as the seed for the rolling window
-  const padScore = avg3 > 0 ? avg3 : avg;
-  const rollingWindow: number[] = sortedPlayedRounds.slice(-3).map(r => perRoundScores[r]);
-  while (rollingWindow.length < 3) rollingWindow.unshift(padScore);
 
   const projectedPrices: Record<number, { price: number; delta: number; projScore: number }> = {};
   const basePrice = stats.price ?? 0;
-  if (ppts > 0 && basePrice > 0) {
-    let chainPrice = basePrice;
-    let chainBE = ppts;
-    for (const m of fixtures) {
-      // Rolling avg is the primary projection — mirrors SC's avg3-based "Points Proj."
-      const rollingAvg = rollingWindow.reduce((a, b) => a + b, 0) / rollingWindow.length;
 
-      // Nudge with opp/venue context only when there's enough historical data (≥3 games).
-      // Thin samples (1-2 games) are noise — pure rolling avg is more reliable.
+  if (ppts !== 0 && basePrice > 0) {
+    // Last two played scores — seed for the 3-game BE rolling window
+    const s_n2 = sortedPlayedRounds.length >= 2
+      ? perRoundScores[sortedPlayedRounds[sortedPlayedRounds.length - 2]]
+      : avg;
+    const s_n1 = sortedPlayedRounds.length >= 1
+      ? perRoundScores[sortedPlayedRounds[sortedPlayedRounds.length - 1]]
+      : avg;
+
+    // BE_n = baseRatio × price_n − s[n-2] − s[n-1]
+    // Derived from the SuperCoach formula; startPrice cancels out of the derivation.
+    const baseRatio = (ppts + s_n2 + s_n1) / basePrice;
+
+    // Footywire uses season avg (not rolling avg) as the forward projection seed
+    const gamesCount = stats.games > 0 ? stats.games : sortedPlayedRounds.length;
+    const pointsCount = stats.total_points > 0 ? stats.total_points : avg * gamesCount;
+    let seasonTotal = pointsCount;
+    let seasonGames = gamesCount;
+
+    let chainPrice = basePrice;
+    let prevChainPrice = basePrice;
+    let chainBE = ppts;
+    let be_s_n2 = s_n2;
+    let be_s_n1 = s_n1;
+    let gamesPlayed = gamesCount;
+
+    for (const m of fixtures) {
+      const seasonAvg = seasonGames > 0 ? seasonTotal / seasonGames : avg;
+
+      // Blend season avg with opp/venue context when enough historical data exists (≥3 games)
       const fp = fixtureProjections[m.round];
       const oppAvg = fp?.oppAvg ?? 0;
       const venueAvg = fp?.venueAvg ?? 0;
       const useOpp = (fp?.oppGames ?? 0) >= 3;
       const useVenue = (fp?.venueGames ?? 0) >= 3;
       let projScore: number;
-      if (useOpp && useVenue) projScore = rollingAvg * 0.65 + oppAvg * 0.25 + venueAvg * 0.10;
-      else if (useOpp)         projScore = rollingAvg * 0.75 + oppAvg * 0.25;
-      else if (useVenue)       projScore = rollingAvg * 0.85 + venueAvg * 0.15;
-      else                     projScore = rollingAvg;
+      if (useOpp && useVenue) projScore = seasonAvg * 0.65 + oppAvg * 0.25 + venueAvg * 0.10;
+      else if (useOpp)         projScore = seasonAvg * 0.75 + oppAvg * 0.25;
+      else if (useVenue)       projScore = seasonAvg * 0.85 + venueAvg * 0.15;
+      else                     projScore = seasonAvg;
 
-      // Advance the window: drop oldest score, push this round's projection
-      rollingWindow.shift();
-      rollingWindow.push(projScore);
+      // "On the bubble": no price change until the player's 3rd game is played
+      let change = 0;
+      if (gamesPlayed >= 2) {
+        change = Math.round((projScore - chainBE) * (chainPrice / SC_PRICE_DIVISOR) / 100) * 100;
+      }
+      const newChainPrice = Math.max(0, chainPrice + change);
 
-      const change = Math.round((projScore - chainBE) * (chainPrice / SC_PRICE_DIVISOR) / 100) * 100;
-      chainPrice = Math.max(0, chainPrice + change);
-      // BE scales linearly with price — if price rises 10%, you need 10% more points to hold it
-      chainBE = ppts * (chainPrice / basePrice);
-      projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - basePrice, projScore: Math.round(projScore) };
+      // Update running season total for next round's projection seed
+      seasonTotal += projScore;
+      seasonGames += 1;
+      gamesPlayed += 1;
+
+      // Shift the BE window and compute next round's BE using the fixed ratio
+      be_s_n2 = be_s_n1;
+      be_s_n1 = projScore;
+      chainBE = baseRatio * newChainPrice - be_s_n2 - be_s_n1;
+
+      prevChainPrice = chainPrice;
+      chainPrice = newChainPrice;
+      projectedPrices[m.round] = { price: chainPrice, delta: chainPrice - prevChainPrice, projScore: Math.round(projScore) };
     }
   }
 
