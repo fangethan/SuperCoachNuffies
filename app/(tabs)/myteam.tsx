@@ -3,12 +3,15 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   Alert, ScrollView, ActivityIndicator,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useNavigation } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { useAppStore } from '../../src/store/useAppStore';
 import { usePlayers } from '../../src/hooks/usePlayers';
+import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { COLORS, POSITIONS, CURRENT_YEAR } from '../../src/constants';
 import { formatPrice } from '../../src/utils/scoring';
+import { PitchView } from '../../src/components/PitchView';
+import { TeamBadge } from '../../src/components/TeamBadge';
 
 const SC_LOGIN_URL = 'https://www.supercoach.com.au/';
 
@@ -58,15 +61,21 @@ const INTERCEPT_JS = `
 
     // ── statsPlayers: team roster as player_ids — enrich with names from map ──
     if (url.indexOf('statsPlayers') !== -1 && obj.players && obj.players.length > 0) {
+      // SC position integers: 1=DEF 2=MID 3=RUC 4=FWD 5=FLEX
+      var scPosMap = { '1': 'DEF', '2': 'MID', '3': 'RUC', '4': 'FWD', '5': 'FLEX' };
       var enriched = obj.players.map(function(tp) {
         var info = _nameMap[String(tp.player_id)] || {};
+        var rawPos = String(tp.position || '');
+        var sc_position = scPosMap[rawPos] || rawPos;
         return {
           player_id:    tp.player_id,
           first_name:   info.first_name || '',
           last_name:    info.last_name  || '',
-          position:     tp.position || '',
+          sc_position:  sc_position,
+          position:     sc_position,
           on_bench:     tp.picked === 'false' || tp.picked === false,
           position_sort: tp.position_sort || 0,
+          emergency:    !!(tp.emergency === true || tp.emergency === 'true' || tp.emg || tp.is_emergency || false),
         };
       });
       var named = enriched.filter(function(p) { return p.first_name; });
@@ -165,17 +174,45 @@ export default function MyTeamScreen() {
     myTeamIds, setMyTeamIds,
     myBenchIds, setMyBenchIds,
     scTradesLeft, setScTradesLeft,
+    captainId, setCaptainId,
+    vcId, setVcId,
+    myTeamScPositions, setMyTeamScPositions,
+    myTeamEmgIds, setMyTeamEmgIds,
   } = useAppStore();
   const currentRound = useAppStore(s => s.currentRound);
   const [showWebView, setShowWebView] = useState(false);
   const [webViewLoading, setWebViewLoading] = useState(true);
   const [syncFailed, setSyncFailed] = useState(false);
   const [pendingScPlayers, setPendingScPlayers] = useState<any[]>([]);
+  const [view, setView] = useState<'pitch' | 'list'>('pitch');
 
   const { data: allPlayers, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
+  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, currentRound, allPlayers ?? []);
   const myPlayers = myTeamIds.length > 0 && allPlayers
     ? allPlayers.filter(p => myTeamIds.includes(p.id))
     : null;
+
+  const navigation = useNavigation();
+  useEffect(() => {
+    if (!myPlayers) { navigation.setOptions({ headerRight: undefined }); return; }
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={styles.headerToggle}>
+          {(['pitch', 'list'] as const).map(v => (
+            <TouchableOpacity
+              key={v}
+              onPress={() => setView(v)}
+              style={[styles.headerToggleBtn, view === v && styles.headerToggleBtnActive]}
+            >
+              <Text style={[styles.headerToggleText, view === v && styles.headerToggleTextActive]}>
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      ),
+    });
+  }, [navigation, view, myPlayers]);
 
   // Match SC players to Footywire players using a tiered strategy:
   // 1. Exact normalised full name
@@ -234,15 +271,22 @@ export default function MyTeamScreen() {
     console.log('[MyTeam] Matched', matched.length, 'of', pendingScPlayers.length, 'SC players');
 
     if (matched.length > 0) {
-      const benchIds = matched
-        .filter(p => {
-          const sc = [...scToFwId.entries()].find(([, id]) => id === p.id)?.[0];
-          return sc?.on_bench === true;
-        })
-        .map(p => p.id);
+      const scPositionMap: Record<number, string> = {};
+      const emgIds: number[] = [];
+      const benchIds: number[] = [];
+
+      matched.forEach(p => {
+        const entry = [...scToFwId.entries()].find(([, id]) => id === p.id);
+        const sc = entry?.[0];
+        if (sc?.sc_position) scPositionMap[p.id] = sc.sc_position;
+        if (sc?.on_bench === true) benchIds.push(p.id);
+        if (sc?.emergency === true) emgIds.push(p.id);
+      });
 
       setMyTeamIds(matched.map(p => p.id));
       setMyBenchIds(benchIds);
+      setMyTeamScPositions(scPositionMap);
+      setMyTeamEmgIds(emgIds);
       setPendingScPlayers([]);
     }
   }, [pendingScPlayers, allPlayers]);
@@ -362,23 +406,34 @@ export default function MyTeamScreen() {
   }
 
   const totalValue = myPlayers.reduce((sum, p) => sum + (p.player_stats?.[0]?.price ?? 0), 0);
+  const totalValueFormatted = '$' + Math.round(totalValue).toLocaleString('en-AU');
   const injured = myPlayers.filter(p => p.injury_suspension_status);
+
+  // Flat map: player id → last round score
+  const flatRoundScores: Record<number, number> = {};
+  myPlayers.forEach(p => {
+    const rs = roundScoresById[p.id];
+    if (rs?.lastScore) flatRoundScores[p.id] = rs.lastScore;
+  });
 
   // Separate starters from bench; flex = bench player whose primary pos differs from their listed group
   const starters = myPlayers.filter(p => !myBenchIds.includes(p.id));
   const bench    = myPlayers.filter(p =>  myBenchIds.includes(p.id));
 
-  const byPosition: Record<string, typeof starters> = { DEF: [], MID: [], FWD: [], RUC: [] };
+  const byPosition: Record<string, typeof starters> = { DEF: [], MID: [], RUC: [], FWD: [], FLEX: [] };
   starters.forEach(p => {
-    const pos = p.positions?.[0]?.position ?? 'MID';
+    const pos = myTeamScPositions[p.id] ?? p.positions?.[0]?.position ?? 'MID';
     if (byPosition[pos]) byPosition[pos].push(p);
+    else byPosition.MID.push(p);
   });
 
   const renderPlayerRow = (player: (typeof myPlayers)[0], isBench = false) => {
     const stats = player.player_stats?.[0];
     const priceChange = stats?.price_change ?? 0;
-    const pos = player.positions?.[0]?.position ?? 'MID';
-    const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
+    const pos = myTeamScPositions[player.id] ?? player.positions?.[0]?.position ?? 'MID';
+    const posColor = pos === 'FLEX' ? '#30D158' : (POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary);
+    const isCap = player.id === captainId;
+    const isVCap = player.id === vcId;
     return (
       <TouchableOpacity
         key={player.id}
@@ -386,49 +441,70 @@ export default function MyTeamScreen() {
         style={[styles.playerRow, isBench && styles.playerRowBench]}
         onPress={() => router.push(`/player/${player.id}`)}
       >
-        <View style={[styles.posDot, { backgroundColor: posColor }]} />
-        <View style={styles.playerInfo}>
-          <Text style={styles.playerName}>{player.first_name} {player.last_name}</Text>
-          <Text style={styles.playerTeam}>{player.team?.abbrev} · {pos}</Text>
+        <View style={styles.badgeWrap}>
+          <TeamBadge teamName={player.team?.name ?? ''} size={38} />
+          {isCap && (
+            <View style={[styles.capBadge, { backgroundColor: '#FFD200' }]}>
+              <Text style={[styles.capText, { color: '#000' }]}>C</Text>
+            </View>
+          )}
+          {isVCap && !isCap && (
+            <View style={[styles.capBadge, { backgroundColor: '#C084FC' }]}>
+              <Text style={styles.capText}>V</Text>
+            </View>
+          )}
         </View>
-        {player.injury_suspension_status ? (
-          <View style={styles.injBadge}><Text style={styles.injText}>{player.injury_suspension_status}</Text></View>
-        ) : null}
-        <View style={styles.playerStats}>
-          <Text style={styles.statValue}>{stats?.avg3?.toFixed(0) ?? '-'}</Text>
+        <View style={styles.playerInfo}>
+          <Text style={styles.playerName} numberOfLines={1}>{player.first_name} {player.last_name}</Text>
+          <View style={styles.playerMeta}>
+            <Text style={styles.playerTeam}>{player.team?.abbrev}</Text>
+            <View style={[styles.posPill, { backgroundColor: posColor + '22', borderColor: posColor + '55' }]}>
+              <Text style={[styles.posLabel, { color: posColor }]}>{pos}</Text>
+            </View>
+            {player.injury_suspension_status ? (
+              <View style={styles.injBadge}><Text style={styles.injText}>{player.injury_suspension_status}</Text></View>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.statCol}>
+          <Text style={styles.statValue}>{stats?.avg3?.toFixed(0) ?? '–'}</Text>
           <Text style={styles.statLabel}>L3</Text>
         </View>
-        <View style={styles.playerStats}>
+        <View style={styles.statCol}>
           <Text style={styles.statValue}>{formatPrice(stats?.price ?? 0)}</Text>
           <Text style={[styles.statLabel, priceChange > 0 ? styles.okText : priceChange < 0 ? styles.dangerText : null]}>
             {priceChange > 0 ? `+${formatPrice(priceChange)}` : priceChange < 0 ? formatPrice(priceChange) : '–'}
           </Text>
         </View>
-        <View style={styles.playerStats}>
+        <View style={styles.statCol}>
           <Text style={[styles.statValue, (stats?.ppts ?? 0) > (stats?.avg3 ?? 0) ? styles.dangerText : styles.okText]}>
-            {stats?.ppts ?? '-'}
+            {stats?.ppts ?? '–'}
           </Text>
           <Text style={styles.statLabel}>BE</Text>
         </View>
-        <Text style={styles.playerChevron}>›</Text>
       </TouchableOpacity>
     );
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Connected banner */}
-      <View style={styles.connectedBadge}>
-        <View style={styles.connectedDot} />
-        <Text style={styles.connectedText}>SuperCoach synced · {myPlayers.length} players</Text>
-        <TouchableOpacity onPress={() => { setSyncFailed(false); setShowWebView(true); }} style={styles.resyncBtn}>
+    <View style={styles.container}>
+      {/* Sync status banner */}
+      <View style={styles.syncBanner}>
+        <View style={styles.syncBannerLeft}>
+          <View style={styles.connectedDot} />
+          <Text style={styles.syncBannerText}>SuperCoach synced · {myPlayers.length} players</Text>
+        </View>
+        <TouchableOpacity
+          onPress={() => { setSyncFailed(false); setShowWebView(true); }}
+          style={styles.resyncBtn}
+        >
           <Text style={styles.resyncText}>Refresh</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Team summary */}
+      {/* Summary boxes */}
       <View style={styles.summaryRow}>
-        <SummaryBox label="Team Value" value={formatPrice(totalValue)} />
+        <SummaryBox label="Team Value" value={totalValueFormatted} />
         <SummaryBox label="Salary Left" value="–" />
         <SummaryBox label="Trades Left" value={scTradesLeft != null ? String(scTradesLeft) : '–'} />
       </View>
@@ -445,86 +521,110 @@ export default function MyTeamScreen() {
         </View>
       ) : null}
 
-      {/* Starting lineup by position */}
-      {(['DEF', 'MID', 'FWD', 'RUC'] as const).map(pos => {
-        const group = byPosition[pos];
-        if (!group?.length) return null;
-        const posColor = POSITIONS[pos]?.color ?? COLORS.primary;
-        return (
-          <View key={pos} style={styles.posGroup}>
-            <View style={[styles.posHeader, { borderLeftColor: posColor }]}>
-              <Text style={[styles.posHeaderText, { color: posColor }]}>{pos}</Text>
-            </View>
-            {group.map(player => renderPlayerRow(player))}
-          </View>
-        );
-      })}
-
-      {/* Bench */}
-      {bench.length > 0 ? (
-        <View style={styles.posGroup}>
-          <View style={[styles.posHeader, { borderLeftColor: COLORS.textMuted }]}>
-            <Text style={[styles.posHeaderText, { color: COLORS.textMuted }]}>BENCH</Text>
-          </View>
-          {bench.map((player, i) => {
-            const pos = player.positions?.[0]?.position ?? 'MID';
-            const starterPositions = starters.map(s => s.positions?.[0]?.position);
-            const isFlex = bench.length > 1 && i === bench.length - 1
-              && !starterPositions.filter(p => p === pos).length;
+      {/* Main content */}
+      {view === 'pitch' ? (
+        <PitchView
+          players={myPlayers}
+          benchIds={myBenchIds}
+          captainId={captainId}
+          vcId={vcId}
+          roundScores={flatRoundScores}
+          scPositions={myTeamScPositions}
+          emgIds={myTeamEmgIds}
+          onPlayerPress={p => router.push(`/player/${p.id}`)}
+          onSetCaptain={setCaptainId}
+          onSetVC={setVcId}
+        />
+      ) : (
+        <ScrollView style={styles.listContainer} contentContainerStyle={styles.listContent}>
+          {/* Starting lineup by position */}
+          {(['DEF', 'MID', 'RUC', 'FWD', 'FLEX'] as const).map(pos => {
+            const group = byPosition[pos];
+            if (!group?.length) return null;
+            const posColor = pos === 'FLEX' ? '#30D158' : (POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary);
             return (
-              <View key={player.id}>
-                {isFlex ? (
-                  <Text style={styles.flexLabel}>FLEX</Text>
-                ) : null}
-                {renderPlayerRow(player, true)}
-              </View>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {/* Fallback: if no bench data yet, show all players flat */}
-      {bench.length === 0 && starters.length === 0 ? (
-        <View style={styles.posGroup}>
-          {(['DEF', 'MID', 'FWD', 'RUC'] as const).map(pos => {
-            const allForPos = myPlayers.filter(p => p.positions?.[0]?.position === pos);
-            if (!allForPos.length) return null;
-            const posColor = POSITIONS[pos]?.color ?? COLORS.primary;
-            return (
-              <View key={pos}>
+              <View key={pos} style={styles.posGroup}>
                 <View style={[styles.posHeader, { borderLeftColor: posColor }]}>
                   <Text style={[styles.posHeaderText, { color: posColor }]}>{pos}</Text>
                 </View>
-                {allForPos.map(p => renderPlayerRow(p))}
+                {group.map(player => renderPlayerRow(player))}
               </View>
             );
           })}
-        </View>
-      ) : null}
 
+          {/* Bench */}
+          {bench.length > 0 ? (
+            <View style={styles.posGroup}>
+              <View style={[styles.posHeader, { borderLeftColor: COLORS.textMuted }]}>
+                <Text style={[styles.posHeaderText, { color: COLORS.textMuted }]}>BENCH</Text>
+              </View>
+              {bench.map((player, i) => {
+                const pos = player.positions?.[0]?.position ?? 'MID';
+                const starterPositions = starters.map(s => s.positions?.[0]?.position);
+                const isFlex = bench.length > 1 && i === bench.length - 1
+                  && !starterPositions.filter(p => p === pos).length;
+                return (
+                  <View key={player.id}>
+                    {isFlex ? <Text style={styles.flexLabel}>FLEX</Text> : null}
+                    {renderPlayerRow(player, true)}
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
 
-      <TouchableOpacity
-        style={styles.disconnectBtn}
-        onPress={() => {
-          Alert.alert('Disconnect', 'Remove your SuperCoach connection?', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Disconnect', style: 'destructive', onPress: () => {
-              setScAuthToken(null);
-              setMyTeamIds([]);
-            }},
-          ]);
-        }}
-      >
-        <Text style={styles.disconnectText}>Disconnect Account</Text>
-      </TouchableOpacity>
-    </ScrollView>
+          {/* Fallback: no bench data yet */}
+          {bench.length === 0 && starters.length === 0 ? (
+            <View style={styles.posGroup}>
+              {(['DEF', 'MID', 'RUC', 'FWD', 'FLEX'] as const).map(pos => {
+                const allForPos = myPlayers.filter(p =>
+                  (myTeamScPositions[p.id] ?? p.positions?.[0]?.position ?? 'MID') === pos
+                );
+                if (!allForPos.length) return null;
+                const posColor = pos === 'FLEX' ? '#30D158' : (POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary);
+                return (
+                  <View key={pos}>
+                    <View style={[styles.posHeader, { borderLeftColor: posColor }]}>
+                      <Text style={[styles.posHeaderText, { color: posColor }]}>{pos}</Text>
+                    </View>
+                    {allForPos.map(p => renderPlayerRow(p))}
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.disconnectBtn}
+            onPress={() => {
+              Alert.alert('Disconnect', 'Remove your SuperCoach connection?', [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Disconnect', style: 'destructive', onPress: () => {
+                  setScAuthToken(null);
+                  setMyTeamIds([]);
+                }},
+              ]);
+            }}
+          >
+            <Text style={styles.disconnectText}>Disconnect Account</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
 function SummaryBox({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <View style={boxStyles.box}>
-      <Text style={[boxStyles.value, danger ? boxStyles.danger : null]}>{value}</Text>
+      <Text
+        style={[boxStyles.value, danger ? boxStyles.danger : null]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+      >
+        {value}
+      </Text>
       <Text style={boxStyles.label}>{label}</Text>
     </View>
   );
@@ -543,7 +643,8 @@ const boxStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.background },
-  content: { padding: 16, paddingBottom: 40 },
+  listContainer: { flex: 1 },
+  listContent: { padding: 16, paddingBottom: 40 },
   webViewHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     padding: 16, backgroundColor: COLORS.surface,
@@ -573,19 +674,33 @@ const styles = StyleSheet.create({
   },
   connectBtnText: { color: COLORS.background, fontWeight: '700', fontSize: 16 },
   connectNote: { fontSize: 11, color: COLORS.textMuted, textAlign: 'center', lineHeight: 16 },
-  connectedBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: COLORS.success + '22', borderRadius: 10,
-    padding: 12, marginBottom: 16,
+  syncBanner: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: COLORS.success + '18',
+    paddingHorizontal: 16, paddingVertical: 9,
+    borderBottomWidth: 1, borderBottomColor: COLORS.success + '33',
   },
-  connectedDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.success, marginRight: 8 },
-  connectedText: { color: COLORS.success, fontWeight: '600', fontSize: 13, flex: 1 },
-  resyncBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: COLORS.success },
+  syncBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  connectedDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: COLORS.success },
+  syncBannerText: { color: COLORS.success, fontWeight: '600', fontSize: 13 },
+  resyncBtn: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 7, borderWidth: 1, borderColor: COLORS.success + '66' },
   resyncText: { fontSize: 12, color: COLORS.success, fontWeight: '600' },
-  summaryRow: { flexDirection: 'row', marginBottom: 16 },
+  summaryRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 2, marginBottom: 6 },
+  // Nav header toggle (rendered via navigation.setOptions)
+  headerToggle: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8, padding: 2, marginRight: 12,
+  },
+  headerToggleBtn: {
+    borderRadius: 6, paddingHorizontal: 14, paddingVertical: 5,
+  },
+  headerToggleBtnActive: { backgroundColor: COLORS.primary },
+  headerToggleText: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
+  headerToggleTextActive: { color: '#000' },
   alertBox: {
     backgroundColor: COLORS.danger + '11', borderRadius: 10,
-    padding: 14, marginBottom: 16,
+    padding: 14, marginBottom: 8, marginHorizontal: 16,
     borderWidth: 1, borderColor: COLORS.danger + '33',
   },
   alertTitle: { fontSize: 14, fontWeight: '700', color: COLORS.danger, marginBottom: 8 },
@@ -598,29 +713,42 @@ const styles = StyleSheet.create({
   playerRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: COLORS.surface, borderRadius: 10,
-    padding: 10, marginBottom: 6,
+    paddingHorizontal: 10, paddingVertical: 9, marginBottom: 7,
     borderWidth: 1, borderColor: COLORS.border,
+    gap: 8,
   },
   playerRowBench: { opacity: 0.75, borderStyle: 'dashed' },
-  posDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8, flexShrink: 0 },
-  playerInfo: { flex: 1 },
-  playerName: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary },
+  badgeWrap: { position: 'relative', flexShrink: 0 },
+  capBadge: {
+    position: 'absolute', top: -4, right: -4,
+    width: 16, height: 16, borderRadius: 8,
+    justifyContent: 'center', alignItems: 'center',
+    borderWidth: 1.5, borderColor: COLORS.background,
+  },
+  capText: { fontSize: 8, fontWeight: '800', color: '#fff' },
+  playerInfo: { flex: 1, minWidth: 0 },
+  playerName: { fontSize: 14, fontWeight: '700', color: COLORS.textPrimary },
+  playerMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
   playerTeam: { fontSize: 11, color: COLORS.textMuted },
+  posPill: {
+    borderRadius: 4, borderWidth: 1,
+    paddingHorizontal: 5, paddingVertical: 1,
+  },
+  posLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
   flexLabel: {
     fontSize: 10, fontWeight: '800', color: COLORS.accent,
     letterSpacing: 1, marginBottom: 4, marginLeft: 2,
   },
   injBadge: {
     backgroundColor: COLORS.danger + '22', borderRadius: 4,
-    paddingHorizontal: 5, paddingVertical: 2, marginRight: 8,
+    paddingHorizontal: 5, paddingVertical: 1,
   },
   injText: { fontSize: 10, color: COLORS.danger, fontWeight: '600' },
-  playerStats: { alignItems: 'center', marginLeft: 10 },
+  statCol: { alignItems: 'center', minWidth: 44 },
   statValue: { fontSize: 13, fontWeight: '700', color: COLORS.textPrimary },
-  statLabel: { fontSize: 9, color: COLORS.textMuted },
+  statLabel: { fontSize: 9, color: COLORS.textMuted, marginTop: 1 },
   dangerText: { color: COLORS.danger },
   okText: { color: COLORS.success },
-  playerChevron: { fontSize: 18, color: COLORS.textMuted, marginLeft: 6 },
   disconnectBtn: {
     marginTop: 24, paddingVertical: 12, borderRadius: 10,
     borderWidth: 1, borderColor: COLORS.danger + '44', alignItems: 'center',

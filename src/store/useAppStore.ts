@@ -6,6 +6,8 @@ import { CURRENT_ROUND, CURRENT_YEAR } from '../constants';
 const STORAGE_TEAM_IDS  = 'my_team_ids_v1';
 const STORAGE_BENCH_IDS = 'my_bench_ids_v1';
 const STORAGE_SC_TOKEN  = 'sc_auth_token_v1';
+const STORAGE_SC_POS    = 'my_team_sc_pos_v1';
+const STORAGE_EMG_IDS   = 'my_team_emg_v1';
 
 interface AppState {
   // Round / year
@@ -60,6 +62,20 @@ interface AppState {
   // Bench player IDs (subset of myTeamIds)
   myBenchIds: number[];
   setMyBenchIds: (ids: number[]) => void;
+
+  // SC-assigned positions for each player (player id → 'DEF'|'MID'|'RUC'|'FWD'|'FLEX')
+  myTeamScPositions: Record<number, string>;
+  setMyTeamScPositions: (m: Record<number, string>) => void;
+
+  // Bench players nominated as Emergency in SC
+  myTeamEmgIds: number[];
+  setMyTeamEmgIds: (ids: number[]) => void;
+
+  // Captain / Vice-Captain selections (user-set, not persisted)
+  captainId: number | null;
+  vcId: number | null;
+  setCaptainId: (id: number | null) => void;
+  setVcId: (id: number | null) => void;
 
   // Trades remaining from SC API
   scTradesLeft: number | null;
@@ -145,6 +161,23 @@ export const useAppStore = create<AppState>((set) => ({
     AsyncStorage.setItem(STORAGE_BENCH_IDS, JSON.stringify(ids)).catch(() => {});
   },
 
+  myTeamScPositions: {},
+  setMyTeamScPositions: (m) => {
+    set({ myTeamScPositions: m });
+    AsyncStorage.setItem(STORAGE_SC_POS, JSON.stringify(m)).catch(() => {});
+  },
+
+  myTeamEmgIds: [],
+  setMyTeamEmgIds: (ids) => {
+    set({ myTeamEmgIds: ids });
+    AsyncStorage.setItem(STORAGE_EMG_IDS, JSON.stringify(ids)).catch(() => {});
+  },
+
+  captainId: null,
+  vcId: null,
+  setCaptainId: (id) => set({ captainId: id && id > 0 ? id : null }),
+  setVcId: (id) => set({ vcId: id && id > 0 ? id : null }),
+
   scTradesLeft: null,
   setScTradesLeft: (n) => set({ scTradesLeft: n }),
 
@@ -157,16 +190,20 @@ export const useAppStore = create<AppState>((set) => ({
       AsyncStorage.removeItem(STORAGE_SC_TOKEN).catch(() => {});
       AsyncStorage.removeItem(STORAGE_TEAM_IDS).catch(() => {});
       AsyncStorage.removeItem(STORAGE_BENCH_IDS).catch(() => {});
-      set({ myBenchIds: [], scTradesLeft: null });
+      AsyncStorage.removeItem(STORAGE_SC_POS).catch(() => {});
+      AsyncStorage.removeItem(STORAGE_EMG_IDS).catch(() => {});
+      set({ myBenchIds: [], scTradesLeft: null, myTeamScPositions: {}, myTeamEmgIds: [] });
     }
   },
 
   hydrateFromStorage: async () => {
     try {
-      const [tokenRaw, idsRaw, benchRaw] = await Promise.all([
+      const [tokenRaw, idsRaw, benchRaw, scPosRaw, emgRaw] = await Promise.all([
         AsyncStorage.getItem(STORAGE_SC_TOKEN),
         AsyncStorage.getItem(STORAGE_TEAM_IDS),
         AsyncStorage.getItem(STORAGE_BENCH_IDS),
+        AsyncStorage.getItem(STORAGE_SC_POS),
+        AsyncStorage.getItem(STORAGE_EMG_IDS),
       ]);
       if (tokenRaw) set({ scAuthToken: tokenRaw });
       if (idsRaw) {
@@ -176,6 +213,14 @@ export const useAppStore = create<AppState>((set) => ({
       if (benchRaw) {
         const ids = JSON.parse(benchRaw);
         if (Array.isArray(ids)) set({ myBenchIds: ids });
+      }
+      if (scPosRaw) {
+        const m = JSON.parse(scPosRaw);
+        if (m && typeof m === 'object') set({ myTeamScPositions: m });
+      }
+      if (emgRaw) {
+        const ids = JSON.parse(emgRaw);
+        if (Array.isArray(ids)) set({ myTeamEmgIds: ids });
       }
     } catch { /* ignore */ }
   },
