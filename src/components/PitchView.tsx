@@ -46,8 +46,9 @@ function getPos(player: Player, scPositions: Record<number, string>): string {
 function PosPill({ label }: { label: string }) {
   const color = POS_COLORS[label] ?? '#fff';
   return (
-    <View style={[styles.pill, { borderColor: color + '88', backgroundColor: color + '22' }]}>
-      <Text style={[styles.pillText, { color }]}>{label}</Text>
+    <View style={[styles.pill, { borderColor: color }]}>
+      <View style={[styles.pillDot, { backgroundColor: color }]} />
+      <Text style={styles.pillText}>{label}</Text>
       {label === 'FLEX' && (
         <View style={styles.infoCircle}>
           <Text style={styles.infoText}>i</Text>
@@ -285,11 +286,13 @@ const styles = StyleSheet.create({
   posGroup: { alignItems: 'center', marginBottom: 14 },
   pill: {
     flexDirection: 'row', alignItems: 'center',
-    borderRadius: 20, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 3,
-    gap: 5, marginBottom: 2,
+    borderRadius: 20, borderWidth: 1.5,
+    paddingHorizontal: 14, paddingVertical: 4,
+    gap: 6, marginBottom: 2,
+    backgroundColor: 'rgba(10,14,26,0.85)',
   },
-  pillText: { fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
+  pillDot: { width: 6, height: 6, borderRadius: 3 },
+  pillText: { fontSize: 11, fontWeight: '800', letterSpacing: 1.4, color: '#fff' },
   infoCircle: {
     width: 13, height: 13, borderRadius: 7,
     backgroundColor: 'rgba(255,255,255,0.12)',
