@@ -25,25 +25,26 @@ export default function CaptainsScreen() {
 
   const candidates = useMemo<CaptainCandidate[]>(() => {
     if (!players) return [];
-    return players
+    const pool = isTeamSynced
+      ? players.filter(p => myTeamIds.includes(p.id))
+      : players;
+    return pool
       .filter(p => {
         if (!p.active || p.injury_suspension_status) return false;
-        // If team is synced, only show players from my team
-        if (isTeamSynced && !myTeamIds.includes(p.id)) return false;
         if (positionFilter !== 'ALL' && !p.positions?.some(pos => pos.position === positionFilter)) return false;
         const stats = p.player_stats?.[0];
-        return stats && stats.total_games >= 2 && stats.avg3 > 60;
+        return stats && (stats.total_games >= 1) && (stats.avg > 50 || stats.avg3 > 50);
       })
       .map(player => {
         const stats = player.player_stats[0];
         const rating = getCaptainRating(
           stats.avg3, stats.avg5, stats.oppavg, stats.venavg, stats.togp
         );
-        return { player, rating, projectedDouble: Math.round(stats.avg3 * 2) };
+        return { player, rating, projectedDouble: Math.round((stats.avg3 || stats.avg) * 2) };
       })
       .sort((a, b) => b.rating - a.rating)
       .slice(0, 30);
-  }, [players, positionFilter]);
+  }, [players, positionFilter, myTeamIds, isTeamSynced]);
 
   if (isLoading) {
     return (

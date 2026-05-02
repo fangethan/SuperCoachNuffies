@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   Alert, ScrollView, ActivityIndicator,
 } from 'react-native';
+import { router } from 'expo-router';
 import { WebView } from 'react-native-webview';
 import { useAppStore } from '../../src/store/useAppStore';
 import { usePlayers } from '../../src/hooks/usePlayers';
@@ -18,6 +19,8 @@ const INTERCEPT_JS = `
 (function() {
   var _sent = false;
   var _teamId = null;
+  // Built from players-cf (all players with names), keyed by SC player ID
+  var _nameMap = {};
 
   function log(msg) {
     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'DEBUG', msg: msg }));
@@ -31,15 +34,61 @@ const INTERCEPT_JS = `
   }
 
   function extractPlayers(data, url) {
-    if (_sent) return;
     if (!data) return;
+
+    // ── Always capture the full player name map from players-cf ────────────────
+    // players-cf is an array of ALL players: [{id, first_name, last_name, ...}]
+    // It fires BEFORE statsPlayers so we build the map here first.
+    if (url.indexOf('players-cf') !== -1 || url.indexOf('/players?') !== -1) {
+      var allArr = Array.isArray(data) ? data : [];
+      allArr.forEach(function(p) {
+        if (p.id && p.first_name) {
+          _nameMap[String(p.id)] = { first_name: p.first_name, last_name: p.last_name || '' };
+        }
+      });
+      log('nameMap built: ' + Object.keys(_nameMap).length + ' entries');
+    }
+
+    if (_sent) return;
+
     var obj = Array.isArray(data) ? data[0] : data;
     if (!obj) return;
 
-    // Log full keys for debugging
     log('keys[' + url.split('/').pop().split('?')[0] + ']=' + Object.keys(obj).slice(0,8).join(','));
 
-    // Try every known location where players might live
+    // ── statsPlayers: team roster as player_ids — enrich with names from map ──
+    if (url.indexOf('statsPlayers') !== -1 && obj.players && obj.players.length > 0) {
+      var enriched = obj.players.map(function(tp) {
+        var info = _nameMap[String(tp.player_id)] || {};
+        return {
+          player_id:    tp.player_id,
+          first_name:   info.first_name || '',
+          last_name:    info.last_name  || '',
+          position:     tp.position || '',
+          on_bench:     tp.picked === 'false' || tp.picked === false,
+          position_sort: tp.position_sort || 0,
+        };
+      });
+      var named = enriched.filter(function(p) { return p.first_name; });
+      log('statsPlayers enriched: ' + named.length + '/' + enriched.length);
+      if (named.length > 0) {
+        // Also extract trades remaining from the response
+        var trades = obj.trades;
+        var tradesLeft = trades && trades.trades_left != null ? trades.trades_left
+          : trades && trades.remaining != null ? trades.remaining : null;
+        if (!_sent) {
+          _sent = true;
+          log('SUCCESS: ' + named.length + ' players, tradesLeft=' + tradesLeft);
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'TEAM_DATA', players: named, tradesLeft: tradesLeft,
+          }));
+        }
+        return;
+      }
+      // If map wasn't ready yet, fall through to other strategies
+    }
+
+    // ── Other endpoints that directly embed player objects with names ──────────
     var candidates = [
       obj.players,
       obj.classic_players,
@@ -50,13 +99,14 @@ const INTERCEPT_JS = `
       obj.data && obj.data.players,
     ];
     for (var i = 0; i < candidates.length; i++) {
-      if (candidates[i] && candidates[i].length > 0) {
-        sendPlayers(candidates[i], url);
+      var c = candidates[i];
+      if (c && c.length > 0 && (c[0].first_name || c[0].name)) {
+        sendPlayers(c, url);
         return;
       }
     }
 
-    // If this is /me or /userteams and has user_team_id, fetch the team directly
+    // ── /me or /userteams: extract team_id and fetch roster directly ──────────
     var teamId = obj.user_team_id || obj.id;
     if (teamId && !_teamId && (url.indexOf('/me') !== -1 || url.indexOf('/userteam') !== -1)) {
       _teamId = teamId;
@@ -76,7 +126,6 @@ const INTERCEPT_JS = `
     var url = (typeof args[0] === 'string' ? args[0] : (args[0] && args[0].url)) || '';
     return origFetch.apply(this, args).then(function(resp) {
       if (url.indexOf('/api/afl/classic') !== -1) {
-        log('fetch: ' + url.replace('https://www.supercoach.com.au/${CURRENT_YEAR}/api/afl/classic/v1/',''));
         resp.clone().json().then(function(data) { extractPlayers(data, url); }).catch(function(){});
       }
       return resp;
@@ -107,44 +156,69 @@ const INTERCEPT_JS = `
 })();
 `;
 
+const normName = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
+
 export default function MyTeamScreen() {
   const webViewRef = useRef<WebView>(null);
-  const { scAuthToken, setScAuthToken, myTeamIds, setMyTeamIds } = useAppStore();
+  const {
+    scAuthToken, setScAuthToken,
+    myTeamIds, setMyTeamIds,
+    myBenchIds, setMyBenchIds,
+    scTradesLeft, setScTradesLeft,
+  } = useAppStore();
   const currentRound = useAppStore(s => s.currentRound);
   const [showWebView, setShowWebView] = useState(false);
   const [webViewLoading, setWebViewLoading] = useState(true);
   const [syncFailed, setSyncFailed] = useState(false);
-  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [pendingScPlayers, setPendingScPlayers] = useState<any[]>([]);
 
-  // Use the main players API, filtered to myTeamIds
   const { data: allPlayers, isLoading } = usePlayers(CURRENT_YEAR, currentRound);
   const myPlayers = myTeamIds.length > 0 && allPlayers
     ? allPlayers.filter(p => myTeamIds.includes(p.id))
     : null;
 
+  // Match SC players to Footywire players by normalised name, also capture bench + trades
+  useEffect(() => {
+    if (pendingScPlayers.length === 0 || !allPlayers || allPlayers.length === 0) return;
+
+    const scNormOf = (sc: any): string => {
+      if (sc.first_name) return normName(sc.first_name + (sc.last_name ?? ''));
+      if (sc.player?.first_name) return normName(sc.player.first_name + sc.player.last_name);
+      if (sc.name) return normName(sc.name);
+      return '';
+    };
+
+    const matched = allPlayers.filter(p => {
+      const pNorm = normName(p.first_name + p.last_name);
+      return pendingScPlayers.some(sc => scNormOf(sc) === pNorm);
+    });
+
+    console.log('[MyTeam] Matched', matched.length, 'of', pendingScPlayers.length, 'SC players');
+
+    if (matched.length > 0) {
+      // Determine which matched players are on the bench (on_bench: true from SC)
+      const benchIds = matched.filter(p => {
+        const pNorm = normName(p.first_name + p.last_name);
+        const sc = pendingScPlayers.find(s => scNormOf(s) === pNorm);
+        return sc?.on_bench === true;
+      }).map(p => p.id);
+
+      setMyTeamIds(matched.map(p => p.id));
+      setMyBenchIds(benchIds);
+      setPendingScPlayers([]);
+    }
+  }, [pendingScPlayers, allPlayers]);
+
   function handleWebViewMessage(event: any) {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
-
-      if (msg.type === 'DEBUG') {
-        const line = `[${new Date().toLocaleTimeString()}] ${msg.msg}`;
-        console.log('[MyTeam WebView]', msg.msg);  // visible in Expo terminal
-        setDebugLog(prev => [line, ...prev].slice(0, 30));
-        return;
-      }
-
+      if (msg.type === 'DEBUG') { console.log('[MyTeam WebView]', msg.msg); return; }
       if (msg.type !== 'TEAM_DATA') return;
       const players: any[] = msg.players ?? [];
-      console.log('[MyTeam] TEAM_DATA received, player count:', players.length);
-      console.log('[MyTeam] First player sample:', JSON.stringify(players[0]));
-      setDebugLog(prev => [`✅ Got ${players.length} players!`, ...prev]);
+      console.log('[MyTeam] TEAM_DATA received:', players.length, 'players, tradesLeft:', msg.tradesLeft);
       if (players.length > 0) {
-        // statsPlayers uses player_id, other endpoints use id
-        const ids: number[] = players
-          .map((p: any) => Number(p.player_id ?? p.id))
-          .filter(n => n > 0);
-        console.log('[MyTeam] Setting myTeamIds:', ids.slice(0, 5), '... total:', ids.length);
-        setMyTeamIds(ids);
+        setPendingScPlayers(players);
+        if (msg.tradesLeft != null) setScTradesLeft(Number(msg.tradesLeft));
         setScAuthToken('connected');
         setSyncFailed(false);
         setShowWebView(false);
@@ -187,13 +261,6 @@ export default function MyTeamScreen() {
           thirdPartyCookiesEnabled={true}
           javaScriptEnabled={true}
         />
-        {/* Debug overlay — shows intercepted network calls */}
-        <View style={styles.debugPanel}>
-          <Text style={styles.debugTitle}>Debug log (last 8 events)</Text>
-          {debugLog.slice(0, 8).map((line, i) => (
-            <Text key={i} style={styles.debugLine} numberOfLines={1}>{line}</Text>
-          ))}
-        </View>
       </View>
     );
   }
@@ -230,6 +297,11 @@ export default function MyTeamScreen() {
           <Text style={styles.connectTitle} numberOfLines={1}>
             {myTeamIds.length > 0 ? 'Loading player data...' : 'Team not synced yet'}
           </Text>
+          {pendingScPlayers.length > 0 ? (
+            <Text style={styles.connectNote}>
+              {`SC intercepted ${pendingScPlayers.length} players — matching names... Check Expo terminal for details.`}
+            </Text>
+          ) : null}
           <Text style={styles.connectDesc}>
             Open the SuperCoach website below, log in, and navigate to your team page.
             The sync happens automatically once the page loads your squad.
@@ -251,27 +323,66 @@ export default function MyTeamScreen() {
     );
   }
 
-  // Team stats from main API data
   const totalValue = myPlayers.reduce((sum, p) => sum + (p.player_stats?.[0]?.price ?? 0), 0);
-  const teamAvg = myPlayers.length > 0
-    ? myPlayers.reduce((sum, p) => sum + (p.player_stats?.[0]?.avg3 ?? 0), 0) / myPlayers.length
-    : 0;
   const injured = myPlayers.filter(p => p.injury_suspension_status);
 
-  // Group by position
-  const byPosition: Record<string, typeof myPlayers> = { DEF: [], MID: [], FWD: [], RUC: [], '?': [] };
-  myPlayers.forEach(p => {
-    const pos = p.positions?.[0]?.position ?? '?';
-    if (!byPosition[pos]) byPosition[pos] = [];
-    byPosition[pos].push(p);
+  // Separate starters from bench; flex = bench player whose primary pos differs from their listed group
+  const starters = myPlayers.filter(p => !myBenchIds.includes(p.id));
+  const bench    = myPlayers.filter(p =>  myBenchIds.includes(p.id));
+
+  const byPosition: Record<string, typeof starters> = { DEF: [], MID: [], FWD: [], RUC: [] };
+  starters.forEach(p => {
+    const pos = p.positions?.[0]?.position ?? 'MID';
+    if (byPosition[pos]) byPosition[pos].push(p);
   });
+
+  const renderPlayerRow = (player: (typeof myPlayers)[0], isBench = false) => {
+    const stats = player.player_stats?.[0];
+    const priceChange = stats?.price_change ?? 0;
+    const pos = player.positions?.[0]?.position ?? 'MID';
+    const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
+    return (
+      <TouchableOpacity
+        key={player.id}
+        activeOpacity={0.75}
+        style={[styles.playerRow, isBench && styles.playerRowBench]}
+        onPress={() => router.push(`/player/${player.id}`)}
+      >
+        <View style={[styles.posDot, { backgroundColor: posColor }]} />
+        <View style={styles.playerInfo}>
+          <Text style={styles.playerName}>{player.first_name} {player.last_name}</Text>
+          <Text style={styles.playerTeam}>{player.team?.abbrev} · {pos}</Text>
+        </View>
+        {player.injury_suspension_status ? (
+          <View style={styles.injBadge}><Text style={styles.injText}>{player.injury_suspension_status}</Text></View>
+        ) : null}
+        <View style={styles.playerStats}>
+          <Text style={styles.statValue}>{stats?.avg3?.toFixed(0) ?? '-'}</Text>
+          <Text style={styles.statLabel}>L3</Text>
+        </View>
+        <View style={styles.playerStats}>
+          <Text style={styles.statValue}>{formatPrice(stats?.price ?? 0)}</Text>
+          <Text style={[styles.statLabel, priceChange > 0 ? styles.okText : priceChange < 0 ? styles.dangerText : null]}>
+            {priceChange > 0 ? `+${formatPrice(priceChange)}` : priceChange < 0 ? formatPrice(priceChange) : '–'}
+          </Text>
+        </View>
+        <View style={styles.playerStats}>
+          <Text style={[styles.statValue, (stats?.ppts ?? 0) > (stats?.avg3 ?? 0) ? styles.dangerText : styles.okText]}>
+            {stats?.ppts ?? '-'}
+          </Text>
+          <Text style={styles.statLabel}>BE</Text>
+        </View>
+        <Text style={styles.playerChevron}>›</Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {/* Connected banner */}
       <View style={styles.connectedBadge}>
         <View style={styles.connectedDot} />
-        <Text style={styles.connectedText}>SuperCoach team synced · {myPlayers.length} players</Text>
+        <Text style={styles.connectedText}>SuperCoach synced · {myPlayers.length} players</Text>
         <TouchableOpacity onPress={() => { setSyncFailed(false); setShowWebView(true); }} style={styles.resyncBtn}>
           <Text style={styles.resyncText}>Refresh</Text>
         </TouchableOpacity>
@@ -280,8 +391,8 @@ export default function MyTeamScreen() {
       {/* Team summary */}
       <View style={styles.summaryRow}>
         <SummaryBox label="Team Value" value={formatPrice(totalValue)} />
-        <SummaryBox label="L3 Avg" value={teamAvg.toFixed(0)} />
-        <SummaryBox label="Injured" value={String(injured.length)} danger={injured.length > 0} />
+        <SummaryBox label="Salary Left" value="–" />
+        <SummaryBox label="Trades Left" value={scTradesLeft != null ? String(scTradesLeft) : '–'} />
       </View>
 
       {/* Injury alerts */}
@@ -296,7 +407,7 @@ export default function MyTeamScreen() {
         </View>
       ) : null}
 
-      {/* Squad by position */}
+      {/* Starting lineup by position */}
       {(['DEF', 'MID', 'FWD', 'RUC'] as const).map(pos => {
         const group = byPosition[pos];
         if (!group?.length) return null;
@@ -306,39 +417,53 @@ export default function MyTeamScreen() {
             <View style={[styles.posHeader, { borderLeftColor: posColor }]}>
               <Text style={[styles.posHeaderText, { color: posColor }]}>{pos}</Text>
             </View>
-            {group.map(player => {
-              const stats = player.player_stats?.[0];
-              return (
-                <View key={player.id} style={styles.playerRow}>
-                  <View style={styles.playerInfo}>
-                    <Text style={styles.playerName}>{player.first_name} {player.last_name}</Text>
-                    <Text style={styles.playerTeam}>{player.team?.abbrev}</Text>
-                  </View>
-                  {player.injury_suspension_status ? (
-                    <View style={styles.injBadge}>
-                      <Text style={styles.injText}>{player.injury_suspension_status}</Text>
-                    </View>
-                  ) : null}
-                  <View style={styles.playerStats}>
-                    <Text style={styles.statValue}>{stats?.avg3?.toFixed(0) ?? '-'}</Text>
-                    <Text style={styles.statLabel}>L3</Text>
-                  </View>
-                  <View style={styles.playerStats}>
-                    <Text style={styles.statValue}>{formatPrice(stats?.price ?? 0)}</Text>
-                    <Text style={styles.statLabel}>Price</Text>
-                  </View>
-                  <View style={styles.playerStats}>
-                    <Text style={[styles.statValue, (stats?.ppts ?? 0) > (stats?.avg3 ?? 0) ? styles.dangerText : styles.okText]}>
-                      {stats?.ppts ?? '-'}
-                    </Text>
-                    <Text style={styles.statLabel}>BE</Text>
-                  </View>
-                </View>
-              );
-            })}
+            {group.map(player => renderPlayerRow(player))}
           </View>
         );
       })}
+
+      {/* Bench */}
+      {bench.length > 0 ? (
+        <View style={styles.posGroup}>
+          <View style={[styles.posHeader, { borderLeftColor: COLORS.textMuted }]}>
+            <Text style={[styles.posHeaderText, { color: COLORS.textMuted }]}>BENCH</Text>
+          </View>
+          {bench.map((player, i) => {
+            const pos = player.positions?.[0]?.position ?? 'MID';
+            const starterPositions = starters.map(s => s.positions?.[0]?.position);
+            const isFlex = bench.length > 1 && i === bench.length - 1
+              && !starterPositions.filter(p => p === pos).length;
+            return (
+              <View key={player.id}>
+                {isFlex ? (
+                  <Text style={styles.flexLabel}>FLEX</Text>
+                ) : null}
+                {renderPlayerRow(player, true)}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {/* Fallback: if no bench data yet, show all players flat */}
+      {bench.length === 0 && starters.length === 0 ? (
+        <View style={styles.posGroup}>
+          {(['DEF', 'MID', 'FWD', 'RUC'] as const).map(pos => {
+            const allForPos = myPlayers.filter(p => p.positions?.[0]?.position === pos);
+            if (!allForPos.length) return null;
+            const posColor = POSITIONS[pos]?.color ?? COLORS.primary;
+            return (
+              <View key={pos}>
+                <View style={[styles.posHeader, { borderLeftColor: posColor }]}>
+                  <Text style={[styles.posHeaderText, { color: posColor }]}>{pos}</Text>
+                </View>
+                {allForPos.map(p => renderPlayerRow(p))}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
 
       <TouchableOpacity
         style={styles.disconnectBtn}
@@ -438,9 +563,15 @@ const styles = StyleSheet.create({
     padding: 10, marginBottom: 6,
     borderWidth: 1, borderColor: COLORS.border,
   },
+  playerRowBench: { opacity: 0.75, borderStyle: 'dashed' },
+  posDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8, flexShrink: 0 },
   playerInfo: { flex: 1 },
   playerName: { fontSize: 14, fontWeight: '600', color: COLORS.textPrimary },
   playerTeam: { fontSize: 11, color: COLORS.textMuted },
+  flexLabel: {
+    fontSize: 10, fontWeight: '800', color: COLORS.accent,
+    letterSpacing: 1, marginBottom: 4, marginLeft: 2,
+  },
   injBadge: {
     backgroundColor: COLORS.danger + '22', borderRadius: 4,
     paddingHorizontal: 5, paddingVertical: 2, marginRight: 8,
@@ -451,15 +582,10 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 9, color: COLORS.textMuted },
   dangerText: { color: COLORS.danger },
   okText: { color: COLORS.success },
+  playerChevron: { fontSize: 18, color: COLORS.textMuted, marginLeft: 6 },
   disconnectBtn: {
     marginTop: 24, paddingVertical: 12, borderRadius: 10,
     borderWidth: 1, borderColor: COLORS.danger + '44', alignItems: 'center',
   },
   disconnectText: { color: COLORS.danger, fontWeight: '600' },
-  debugPanel: {
-    position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)', padding: 8, maxHeight: 160,
-  },
-  debugTitle: { color: '#00ff88', fontSize: 10, fontWeight: '700', marginBottom: 4 },
-  debugLine: { color: '#aaffcc', fontSize: 9, fontFamily: 'monospace', lineHeight: 13 },
 });

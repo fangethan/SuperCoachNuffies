@@ -1,6 +1,11 @@
 import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Player, PositionFilter, SortOption } from '../types';
 import { CURRENT_ROUND, CURRENT_YEAR } from '../constants';
+
+const STORAGE_TEAM_IDS  = 'my_team_ids_v1';
+const STORAGE_BENCH_IDS = 'my_bench_ids_v1';
+const STORAGE_SC_TOKEN  = 'sc_auth_token_v1';
 
 interface AppState {
   // Round / year
@@ -52,9 +57,20 @@ interface AppState {
   // Reset all filters to defaults
   resetFilters: () => void;
 
+  // Bench player IDs (subset of myTeamIds)
+  myBenchIds: number[];
+  setMyBenchIds: (ids: number[]) => void;
+
+  // Trades remaining from SC API
+  scTradesLeft: number | null;
+  setScTradesLeft: (n: number | null) => void;
+
   // Auth token for SuperCoach personal features
   scAuthToken: string | null;
   setScAuthToken: (token: string | null) => void;
+
+  // Hydrate persisted team state from AsyncStorage on cold start
+  hydrateFromStorage: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -75,15 +91,20 @@ export const useAppStore = create<AppState>((set) => ({
   setSearchQuery: (q) => set({ searchQuery: q }),
 
   myTeamIds: [],
-  setMyTeamIds: (ids) => set({ myTeamIds: ids }),
-  addToMyTeam: (id) => set(state => ({
-    myTeamIds: state.myTeamIds.includes(id)
-      ? state.myTeamIds
-      : [...state.myTeamIds, id],
-  })),
-  removeFromMyTeam: (id) => set(state => ({
-    myTeamIds: state.myTeamIds.filter(i => i !== id),
-  })),
+  setMyTeamIds: (ids) => {
+    set({ myTeamIds: ids });
+    AsyncStorage.setItem(STORAGE_TEAM_IDS, JSON.stringify(ids)).catch(() => {});
+  },
+  addToMyTeam: (id) => set(state => {
+    const next = state.myTeamIds.includes(id) ? state.myTeamIds : [...state.myTeamIds, id];
+    AsyncStorage.setItem(STORAGE_TEAM_IDS, JSON.stringify(next)).catch(() => {});
+    return { myTeamIds: next };
+  }),
+  removeFromMyTeam: (id) => set(state => {
+    const next = state.myTeamIds.filter(i => i !== id);
+    AsyncStorage.setItem(STORAGE_TEAM_IDS, JSON.stringify(next)).catch(() => {});
+    return { myTeamIds: next };
+  }),
 
   showOwnedOnly: false,
   setShowOwnedOnly: (v) => set({ showOwnedOnly: v }),
@@ -118,6 +139,44 @@ export const useAppStore = create<AppState>((set) => ({
     byeRoundFilters: [],
   }),
 
+  myBenchIds: [],
+  setMyBenchIds: (ids) => {
+    set({ myBenchIds: ids });
+    AsyncStorage.setItem(STORAGE_BENCH_IDS, JSON.stringify(ids)).catch(() => {});
+  },
+
+  scTradesLeft: null,
+  setScTradesLeft: (n) => set({ scTradesLeft: n }),
+
   scAuthToken: null,
-  setScAuthToken: (token) => set({ scAuthToken: token }),
+  setScAuthToken: (token) => {
+    set({ scAuthToken: token });
+    if (token) {
+      AsyncStorage.setItem(STORAGE_SC_TOKEN, token).catch(() => {});
+    } else {
+      AsyncStorage.removeItem(STORAGE_SC_TOKEN).catch(() => {});
+      AsyncStorage.removeItem(STORAGE_TEAM_IDS).catch(() => {});
+      AsyncStorage.removeItem(STORAGE_BENCH_IDS).catch(() => {});
+      set({ myBenchIds: [], scTradesLeft: null });
+    }
+  },
+
+  hydrateFromStorage: async () => {
+    try {
+      const [tokenRaw, idsRaw, benchRaw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_SC_TOKEN),
+        AsyncStorage.getItem(STORAGE_TEAM_IDS),
+        AsyncStorage.getItem(STORAGE_BENCH_IDS),
+      ]);
+      if (tokenRaw) set({ scAuthToken: tokenRaw });
+      if (idsRaw) {
+        const ids = JSON.parse(idsRaw);
+        if (Array.isArray(ids) && ids.length > 0) set({ myTeamIds: ids });
+      }
+      if (benchRaw) {
+        const ids = JSON.parse(benchRaw);
+        if (Array.isArray(ids)) set({ myBenchIds: ids });
+      }
+    } catch { /* ignore */ }
+  },
 }));

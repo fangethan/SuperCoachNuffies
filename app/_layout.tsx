@@ -12,6 +12,12 @@ const queryClient = new QueryClient();
 // maxRound is always updated (so the round picker knows the upper bound).
 // currentRound is only set once on first detection — user picks via the
 // round picker are not overridden on subsequent 15-min refetches.
+function StorageHydrator() {
+  const hydrateFromStorage = useAppStore(s => s.hydrateFromStorage);
+  useEffect(() => { hydrateFromStorage(); }, []);
+  return null;
+}
+
 function RoundSync() {
   const { data: detectedRound } = useCurrentRound(CURRENT_YEAR);
   const { setCurrentRound, setMaxRound } = useAppStore();
@@ -34,6 +40,7 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <StatusBar style="light" />
+      <StorageHydrator />
       <RoundSync />
       <Stack
         screenOptions={{
