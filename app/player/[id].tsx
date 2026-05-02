@@ -69,7 +69,9 @@ export default function PlayerDetailScreen() {
   const posColor = POSITIONS[pos as keyof typeof POSITIONS]?.color ?? COLORS.primary;
   const isDPP = allPositions.length > 1;
   const weeklyPriceChange = stats.price_change ?? 0;
+  const totalPriceChange = stats.total_price_change ?? 0;
   const priceDir = getPriceDirection(weeklyPriceChange);
+  const totalPriceDir = getPriceDirection(totalPriceChange);
   const allByeRounds = byeMap?.[player.team?.name ?? ''] ?? [];
   const futureByeRounds = allByeRounds.filter(r => r > maxRound);
 
@@ -248,6 +250,14 @@ export default function PlayerDetailScreen() {
           ]}>
             {weeklyPriceChange !== 0 ? formatPriceChange(weeklyPriceChange) : '-'}
           </Text>
+          {totalPriceChange !== 0 ? (
+            <Text style={[
+              styles.priceTotal,
+              totalPriceDir === 'up' ? styles.up : totalPriceDir === 'down' ? styles.down : styles.neutral,
+            ]}>
+              ({formatPriceChange(totalPriceChange)})
+            </Text>
+          ) : null}
         </View>
         <View style={styles.priceBox}>
           <Text style={styles.priceLabel}>Owned</Text>
@@ -568,6 +578,7 @@ const styles = StyleSheet.create({
   priceBox: { flex: 1, alignItems: 'center' },
   priceLabel: { fontSize: 10, color: COLORS.textMuted, marginBottom: 2 },
   priceValue: { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
+  priceTotal: { fontSize: 11, fontWeight: '500', marginTop: 2 },
   up: { color: COLORS.success },
   down: { color: COLORS.danger },
   neutral: { color: COLORS.textSecondary },

@@ -177,31 +177,69 @@ export default function MyTeamScreen() {
     ? allPlayers.filter(p => myTeamIds.includes(p.id))
     : null;
 
-  // Match SC players to Footywire players by normalised name, also capture bench + trades
+  // Match SC players to Footywire players using a tiered strategy:
+  // 1. Exact normalised full name
+  // 2. Same surname + one first name is a prefix of the other (Zach↔Zachary, Sam↔Samuel)
+  // 3. Same surname, only one FW candidate — almost certainly the same player
+  // 4. Same surname + same position as tiebreaker
   useEffect(() => {
     if (pendingScPlayers.length === 0 || !allPlayers || allPlayers.length === 0) return;
 
-    const scNormOf = (sc: any): string => {
-      if (sc.first_name) return normName(sc.first_name + (sc.last_name ?? ''));
-      if (sc.player?.first_name) return normName(sc.player.first_name + sc.player.last_name);
-      if (sc.name) return normName(sc.name);
-      return '';
-    };
-
-    const matched = allPlayers.filter(p => {
-      const pNorm = normName(p.first_name + p.last_name);
-      return pendingScPlayers.some(sc => scNormOf(sc) === pNorm);
+    // Index FW players by normalised last name for fast lookup
+    const fwByLast: Record<string, typeof allPlayers> = {};
+    allPlayers.forEach(p => {
+      const key = normName(p.last_name);
+      if (!fwByLast[key]) fwByLast[key] = [];
+      fwByLast[key].push(p);
     });
 
+    const scToFwId = new Map<any, number>();
+
+    for (const sc of pendingScPlayers) {
+      const scFirst = normName(sc.first_name ?? sc.player?.first_name ?? '');
+      const scLast  = normName(sc.last_name  ?? sc.player?.last_name  ?? sc.name ?? '');
+      if (!scLast) continue;
+
+      // Tier 1: exact full name
+      const exact = allPlayers.find(p =>
+        normName(p.first_name) === scFirst && normName(p.last_name) === scLast
+      );
+      if (exact) { scToFwId.set(sc, exact.id); continue; }
+
+      const candidates = fwByLast[scLast] ?? [];
+      if (candidates.length === 0) continue;
+
+      // Tier 2: first-name prefix (one is a prefix of the other)
+      const prefix = candidates.find(p => {
+        const fwF = normName(p.first_name);
+        return fwF.startsWith(scFirst) || scFirst.startsWith(fwF);
+      });
+      if (prefix) { scToFwId.set(sc, prefix.id); continue; }
+
+      // Tier 3: sole FW player with this surname
+      if (candidates.length === 1) { scToFwId.set(sc, candidates[0].id); continue; }
+
+      // Tier 4: position tiebreaker
+      const scPos = sc.position ?? '';
+      if (scPos) {
+        const posMatch = candidates.find(p =>
+          p.positions?.some(pp => pp.position === scPos)
+        );
+        if (posMatch) { scToFwId.set(sc, posMatch.id); continue; }
+      }
+    }
+
+    const matchedIds = new Set(scToFwId.values());
+    const matched = allPlayers.filter(p => matchedIds.has(p.id));
     console.log('[MyTeam] Matched', matched.length, 'of', pendingScPlayers.length, 'SC players');
 
     if (matched.length > 0) {
-      // Determine which matched players are on the bench (on_bench: true from SC)
-      const benchIds = matched.filter(p => {
-        const pNorm = normName(p.first_name + p.last_name);
-        const sc = pendingScPlayers.find(s => scNormOf(s) === pNorm);
-        return sc?.on_bench === true;
-      }).map(p => p.id);
+      const benchIds = matched
+        .filter(p => {
+          const sc = [...scToFwId.entries()].find(([, id]) => id === p.id)?.[0];
+          return sc?.on_bench === true;
+        })
+        .map(p => p.id);
 
       setMyTeamIds(matched.map(p => p.id));
       setMyBenchIds(benchIds);

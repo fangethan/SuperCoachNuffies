@@ -173,11 +173,11 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
           return (
             <View style={styles.priceRow}>
               <Text style={styles.priceText}>{formatPrice(price)}</Text>
-              {total !== 0 ? (
-                <Text style={[styles.priceChange, { color: totalCol }]}> {formatPriceChange(total)}</Text>
-              ) : null}
               {weekly !== 0 ? (
-                <Text style={[styles.priceWeekly, { color: weeklyCol }]}> ({formatPriceChange(weekly)})</Text>
+                <Text style={[styles.priceChange, { color: weeklyCol }]}> {formatPriceChange(weekly)}</Text>
+              ) : null}
+              {total !== 0 ? (
+                <Text style={[styles.priceWeekly, { color: totalCol }]}> ({formatPriceChange(total)})</Text>
               ) : null}
             </View>
           );

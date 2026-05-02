@@ -25,8 +25,11 @@ export default function TradesScreen() {
 
   const tradeIn = useMemo(() => {
     if (!players) return [];
-    return getTradeInTargets(players, posFilter);
-  }, [players, posFilter]);
+    const available = myTeamIds.length > 0
+      ? players.filter(p => !myTeamIds.includes(p.id))
+      : players;
+    return getTradeInTargets(available, posFilter);
+  }, [players, posFilter, myTeamIds]);
 
   const tradeOut = useMemo(() => {
     if (!players) return [];
