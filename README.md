@@ -15,7 +15,8 @@ screenshot stays on the device.
 - [What it does](#what-it-does)
 - [Features by tab](#features-by-tab)
 - [Tech stack](#tech-stack)
-- [How data flows in (no backend)](#how-data-flows-in-no-backend)
+- [Where AFL data comes from](#where-afl-data-comes-from)
+- [Storage architecture](#storage-architecture)
 - [System diagram](#system-diagram)
 - [Local development](#local-development)
 - [Roadmap](#roadmap)
@@ -164,8 +165,10 @@ Cleared via **Clear Imported Team** at the bottom of the list view.
 | Framework | **Expo SDK 54** + React Native 0.81.5 | Fast iteration, OTA-friendly, custom native modules via dev builds |
 | Language | TypeScript 5.9 | |
 | Navigation | **expo-router** (file-based) | Tabs are folders under `app/(tabs)/`; deep linking is free |
-| State | **Zustand** + AsyncStorage hydration | Lightweight, no Provider boilerplate, persists across launches |
+| State | **Zustand** + AsyncStorage hydration | Lightweight, no Provider boilerplate, persists team across launches |
 | Server cache | **@tanstack/react-query** | Round-aware refetching, stale-while-revalidate for stats |
+| Local cache | **expo-sqlite** (`kv_blob` table, WAL) | Per-row read for big caches (BEs, scores, projections, matchups) |
+| Cloud sync | **Supabase** (Postgres + Auth) | Magic-link sign-in; one `user_teams` row per user holds the imported squad |
 | OCR | **@react-native-ml-kit/text-recognition** | Local on-device, no network, no API keys |
 | Charts | react-native-svg, react-native-gifted-charts | |
 | Engine | Hermes, **New Architecture enabled** | |
@@ -173,12 +176,12 @@ Cleared via **Clear Imported Team** at the bottom of the list view.
 
 ---
 
-## How data flows in (no backend)
+## Where AFL data comes from
 
-There's **no custom backend server**. The app makes HTTP requests directly
-from the iPhone to two **public third-party** data sources, then caches the
-results locally. "No backend" means we don't run our own API — not that the
-app works offline.
+The only "server" the app runs is **Supabase** — and that's just for auth
+and your imported team (covered in [Storage architecture](#storage-architecture)
+below). Every byte of AFL stats data is fetched directly from the iPhone
+to two **public third-party** sources and cached locally.
 
 ### Footywire (HTML scraping)
 
@@ -193,7 +196,9 @@ JavaScript. Routes used (in `src/api/footywire.ts`):
 - `/afl/footy/ft_player_history?pid=...` — per-player career history
 
 All requests go through `fetchWithRetry()` (3 attempts, exponential
-backoff). Player breakeven data is cached in AsyncStorage for 6 hours.
+backoff). Heavy payloads (per-round scores, per-player BE history,
+fixture projections, matchup history) are cached in SQLite for 6 hours;
+see [Storage architecture](#storage-architecture).
 
 ### Squiggle (JSON REST API)
 
@@ -222,35 +227,136 @@ fetched** React Query cache.
 
 ---
 
+## Storage architecture
+
+Three layers, each with one job:
+
+| Layer | Backend | Holds | Why this tool |
+|---|---|---|---|
+| **Cloud** | Supabase (Postgres + Auth) | One `user_teams` row per signed-in user, holding the imported squad as JSON | Sign in on a second iPhone with the same email and your team appears. Row-Level Security gates access — no backend code to write. |
+| **Local KV** | AsyncStorage | Imported team IDs (starters, bench, emergencies, captain, vice), per-position SC roles | Small, written on every interaction, doesn't need queries |
+| **Local cache** | SQLite (`expo-sqlite`) | Per-player breakevens, per-round scores, fixture projections, matchup history | One row read per lookup instead of parsing a 789-entry JSON map every player tap |
+
+### Cloud (Supabase)
+
+`src/api/supabase.ts` exposes a singleton client; `src/api/teamSync.ts`
+wraps it with two operations:
+
+- **`pushTeam(snapshot)`** — upserts the current squad into `user_teams`
+  after a successful screenshot import.
+- **`pullTeam()`** — reads the cloud snapshot on cold start and merges it
+  over local state (cloud wins on conflict).
+
+Schema:
+
+```sql
+create table public.user_teams (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  team_data  jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_teams enable row level security;
+create policy "owner-rw" on public.user_teams
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
+
+Auth is **email magic-link** (`supabase.auth.signInWithOtp`). The
+unsigned-in state shows `<AuthScreen />` from `app/_layout.tsx`; the rest
+of the app mounts once a session exists.
+
+### Local KV (AsyncStorage)
+
+A handful of keys hold the imported team plus a couple of small flags
+(`src/store/useAppStore.ts`):
+
+- `myTeamIds`, `myBenchIds`, `myTeamScPositions`, `myTeamEmgIds` — the
+  squad imported from a screenshot
+- `captainId`, `vcId` — current week's captain / vice
+
+Hydration runs on cold start before the first render; writes are
+fire-and-forget on every interaction. After hydrate, the store calls
+`pullTeam()` and merges the cloud snapshot on top, so the same login on a
+second device populates the squad without a re-import.
+
+### Local cache (SQLite)
+
+A single `kv_blob` table backs every heavy cache (`src/store/db.ts`):
+
+```sql
+create table kv_blob (
+  key        text primary key,
+  value      text not null,         -- JSON payload
+  updated_at integer not null       -- epoch ms
+);
+create index idx_kv_blob_updated on kv_blob(updated_at);
+
+pragma journal_mode = WAL;
+```
+
+Keys are namespaced by a short prefix so caches don't collide and a whole
+namespace can be wiped in one statement with `cache.deleteByPrefix("be:")`:
+
+| Prefix | Holds | Where |
+|---|---|---|
+| `be7:` | Per-player round-by-round breakevens (versioned — bump prefix to invalidate every cached row) | `src/api/footywire.ts` |
+| `rs:`  | Per-round score map keyed `rs:{year}_{round}` | `src/hooks/useRoundScores.ts` |
+| `fx:`  | Fixture projections (opponent + venue averages) per player + round | `src/hooks/usePlayers.ts` |
+| `mu:`  | Matchup history (player vs opponent / venue) | `src/hooks/usePlayers.ts` |
+
+Read path: `cache.getJson(key)` deserialises a single row. Write path:
+`cache.setJson(key, value)` upserts with the current timestamp. Stale data
+is detected with `cache.isFresh(key, maxAgeMs)`.
+
+Wins over the previous AsyncStorage-only setup:
+
+- Lookups read **one row**, not the whole 789-entry breakeven map
+- TTL lives next to the row (`updated_at`), not embedded in each payload
+- Whole namespaces invalidate by prefix in a single SQL statement
+
+---
+
 ## System diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                              iPhone                              │
-│                                                                  │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │  Tabs:  Players │ Captains │ Trades │ Stat DNA │ My Team │  │
-│  └─────────┬───────────────────────────────────────────┬────┘  │
-│            ▼                                           ▼        │
-│  ┌──────────────────┐                   ┌──────────────────┐   │
-│  │  Zustand store   │◀── persist ──▶   │  AsyncStorage    │   │
-│  │  filters, team,  │     hydrate       │  (caches + team) │   │
-│  │  captain, VC     │                   └──────────────────┘   │
-│  └────────┬─────────┘                                          │
-│           ▼                                                    │
-│  ┌────────────────────────────────────────────────────────┐   │
-│  │  React Query  (stale-while-revalidate cache)            │   │
-│  │  keyed on [year, round]                                  │   │
-│  └────────┬──────────────────────────────────┬─────────────┘   │
-│           ▼                                   ▼                 │
-│  ┌────────────────┐                  ┌─────────────────┐       │
-│  │  footywire.ts  │                  │  squiggle.ts    │       │
-│  │  (HTML scrape) │                  │  (JSON REST)    │       │
-│  └───────┬────────┘                  └────────┬────────┘       │
-└──────────┼─────────────────────────────────────┼──────────────┘
-           ▼                                     ▼
-   footywire.com.au                     api.squiggle.com.au
-   (public AFL stats)                   (public fixture API)
+                ┌────────────────────────── Cloud ──────────────────────────┐
+                │  Supabase: auth (magic link) + user_teams (team JSON)     │
+                └─────────────────────────────┬─────────────────────────────┘
+                                              │ pull on cold-start
+                                              │ push on import
+┌─────────────────────────────────────────────┼─────────────────────────────┐
+│                                          iPhone                            │
+│                                                                            │
+│  ┌──────────────────────────────────────────────────────────────────────┐ │
+│  │   Tabs:   Players │ Captains │ Trades │ Stat DNA │ My Team           │ │
+│  └─────────┬──────────────────────────────────────────────┬─────────────┘ │
+│            ▼                                              ▼               │
+│  ┌──────────────────┐                          ┌──────────────────────┐   │
+│  │  Zustand store   │◀── persist (small KV) ──▶│  AsyncStorage        │   │
+│  │  filters, team,  │                          │  team IDs, captain,  │   │
+│  │  captain, VC     │                          │  vice, SC positions  │   │
+│  └────────┬─────────┘                          └──────────────────────┘   │
+│           ▼                                                               │
+│  ┌──────────────────────────────────────────────────────────────────┐    │
+│  │  React Query  (stale-while-revalidate, in-memory)                 │    │
+│  │  keyed on [year, round]                                           │    │
+│  └────────┬──────────────────────────────────┬──────────────────────┘    │
+│           ▼                                   ▼                           │
+│  ┌────────────────┐                  ┌─────────────────┐                  │
+│  │  footywire.ts  │                  │  squiggle.ts    │                  │
+│  │  (HTML scrape) │                  │  (JSON REST)    │                  │
+│  └────────┬───────┘                  └────────┬────────┘                  │
+│           │  persist payloads                 │  persist payloads         │
+│           └──────────────────┬─────────────────┘                          │
+│                              ▼                                            │
+│             ┌──────────────────────────────────┐                          │
+│             │   SQLite kv_blob  (local cache)   │                          │
+│             │   be7: / rs: / fx: / mu: prefixes │                          │
+│             └──────────────────────────────────┘                          │
+└────────────────────────────────────────────────────────────────────────────┘
+                  │                                     │
+                  ▼                                     ▼
+         footywire.com.au                     api.squiggle.com.au
+         (public AFL stats)                   (public fixture API)
 
 
               Screenshot import — independent path
@@ -267,7 +373,9 @@ fetched** React Query cache.
               teamScreenshotParser + tier matcher
                               │
                               ▼
-                       Zustand store
+                       Zustand store ──▶ AsyncStorage  (local persist)
+                              │
+                              └────────▶ Supabase pushTeam()  (cloud)
 ```
 
 The two halves of the app touch each other only through the Zustand store:
@@ -340,14 +448,8 @@ These are tracked separately and will land as their own PRs:
 - **Sentry** — drop-in RN SDK for crashes, JS errors, breadcrumbs around
   Footywire/Squiggle calls and the screenshot import path. Replaces the
   silent `try/catch` blocks in `src/api`, `src/hooks`, and `src/store`.
-- **MMKV** — drop-in faster replacement for AsyncStorage. Migrates existing
-  storage keys on first launch.
-- **Supabase cloud sync** — single `user_teams` row keyed on the user's
-  Supabase auth ID, holding the imported squad as JSON. Magic-link sign-in
-  on first launch. Server is source of truth; same team appears on a second
-  iPhone with the same email.
-- **EAS Update / EAS Build** (later) — over-the-air JS updates and cloud
-  iOS builds for TestFlight.
+- **EAS Update / EAS Build** — over-the-air JS updates and cloud iOS
+  builds for TestFlight.
 
 ---
 
