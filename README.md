@@ -24,23 +24,18 @@ screenshot stays on the device.
 
 ## What it does
 
-Three things the official SuperCoach site does poorly:
+Two things the official SuperCoach site does poorly that SuperCoachNuffies wishes to improve:
 
-1. **Player stats, deeply searchable** — every AFL player with their season
-   averages, last-3 / last-5 averages, round-by-round scores, price,
-   projected price change, breakeven, ownership %, injury/suspension status,
-   bye round. Sortable by any of these. Filterable by position, price band,
-   bye rounds, "owned only", and "bubble" rookies (under 3 games).
-2. **Captain-pick advice** — ranks every active player (or your synced team)
+1. **Captain-pick advice** — ranks every active player (or your synced team)
    by a captain rating that combines recent form, opponent average vs that
    position, the player's average at the venue, and time-on-ground. Top pick
    is your captain, second is your vice. Updated weekly with each new round.
-3. **Trade advice** — two views: best players to **trade IN** (form +
+2. **Trade advice** — two views: best players to **trade IN** (form +
    upcoming-fixture friendliness, filtered to ones not already on your team)
    and underperformers to **trade OUT** of your own squad (poor recent form,
    upcoming byes, injury status).
 
-All three feed off the same import: take a screenshot of your SuperCoach team
+Both features feed off the same import: take a screenshot of your SuperCoach team
 page, the app reads it locally with on-device OCR, links each player to live
 stats, and unlocks personalised captain + trade recommendations.
 
