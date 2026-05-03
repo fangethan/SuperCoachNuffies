@@ -1,7 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Player, PlayerStats, Position, Team } from '../types';
+import { getEntry, setJson } from '../store/cache';
 
-const PLAYER_BE_CACHE_KEY = 'player_round_bes_v1';
+const PLAYER_BE_KEY_PREFIX = 'be:';
 const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -853,14 +853,11 @@ async function fetchPlayerRoundBEs(
   const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
   if (!slug) return {};
 
-  const cacheEntry = `${slug}_${year}_${currentBE}`;
+  const cacheKey = `${PLAYER_BE_KEY_PREFIX}${slug}_${year}_${currentBE}`;
   try {
-    const raw = await AsyncStorage.getItem(PLAYER_BE_CACHE_KEY);
-    if (raw) {
-      const stored: Record<string, { data: Record<number, number>; ts: number }> = JSON.parse(raw);
-      if (stored[cacheEntry] && Date.now() - stored[cacheEntry].ts < PLAYER_BE_TTL) {
-        return stored[cacheEntry].data;
-      }
+    const cached = await getEntry<Record<number, number>>(cacheKey);
+    if (cached && Date.now() - cached.updatedAt < PLAYER_BE_TTL) {
+      return cached.value;
     }
   } catch { /* ignore */ }
 
@@ -923,10 +920,7 @@ async function fetchPlayerRoundBEs(
   }
 
   try {
-    const raw = await AsyncStorage.getItem(PLAYER_BE_CACHE_KEY);
-    const stored: Record<string, { data: Record<number, number>; ts: number }> = raw ? JSON.parse(raw) : {};
-    stored[cacheEntry] = { data: result, ts: Date.now() };
-    await AsyncStorage.setItem(PLAYER_BE_CACHE_KEY, JSON.stringify(stored));
+    await setJson(cacheKey, result);
   } catch { /* ignore */ }
 
   return result;

@@ -1,11 +1,11 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
 import { footywireApi, PlayerRoundScores, MatchEntry } from '../api/footywire';
 import { Player, PositionFilter, SortOption } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { CURRENT_YEAR } from '../constants';
+import { getJson, setJson } from '../store/cache';
 
 export { PlayerRoundScores };
 
@@ -193,7 +193,7 @@ export function usePlayerRoundBEs(player: Player | undefined, year: number, ppts
       player!.first_name, player!.last_name, player!.team.name, year, ppts,
     ),
     enabled: !!player,
-    staleTime: 1000 * 60 * 60 * 24, // 24 hours — backed by AsyncStorage in fetchPlayerRoundBEs
+    staleTime: 1000 * 60 * 60 * 24, // 24 hours — backed by SQLite cache in fetchPlayerRoundBEs
     placeholderData: (prev) => prev,
   });
 }
@@ -207,8 +207,6 @@ export interface FixtureProjection {
   oppAvg: number; oppGames: number;
   venueAvg: number; venueGames: number;
 }
-
-const FIXTURE_PROJ_STORAGE_KEY = 'fixture_projections_v5';
 
 export function useFixtureProjections(
   player: Player | undefined,
@@ -226,14 +224,11 @@ export function useFixtureProjections(
     queryFn: async () => {
       if (!player || fixtures.length === 0) return {};
 
-      const cacheKey = `${player.id}_${CURRENT_YEAR}_${fixtures.map(f => f.round).join('_')}`;
+      const cacheKey = `fx:${player.id}_${CURRENT_YEAR}_${fixtures.map(f => f.round).join('_')}`;
 
       try {
-        const raw = await AsyncStorage.getItem(FIXTURE_PROJ_STORAGE_KEY);
-        if (raw) {
-          const stored: Record<string, Record<number, FixtureProjection>> = JSON.parse(raw);
-          if (stored[cacheKey]) return stored[cacheKey];
-        }
+        const stored = await getJson<Record<number, FixtureProjection>>(cacheKey);
+        if (stored) return stored;
       } catch { /* ignore */ }
 
       const [historicalMatchLists, historicalScores] = await Promise.all([
@@ -296,10 +291,7 @@ export function useFixtureProjections(
       });
 
       try {
-        const raw = await AsyncStorage.getItem(FIXTURE_PROJ_STORAGE_KEY);
-        const stored: Record<string, Record<number, FixtureProjection>> = raw ? JSON.parse(raw) : {};
-        stored[cacheKey] = result;
-        await AsyncStorage.setItem(FIXTURE_PROJ_STORAGE_KEY, JSON.stringify(stored));
+        await setJson(cacheKey, result);
       } catch { /* ignore */ }
 
       return result;
@@ -317,8 +309,6 @@ export interface MatchupStats {
   venueAvg: number;
 }
 
-const MATCHUP_STORAGE_KEY = 'matchup_stats_v1';
-
 export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntry | undefined) {
   const queryClient = useQueryClient();
 
@@ -329,15 +319,12 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
     queryFn: async () => {
       if (!player || !nextMatch) return null;
 
-      const cacheKey = `${player.id}_${nextMatch.round}_${CURRENT_YEAR}`;
+      const cacheKey = `mu:${player.id}_${nextMatch.round}_${CURRENT_YEAR}`;
 
-      // 1. Check AsyncStorage — survives app restarts, invalidated per player+round+year
+      // 1. Check SQLite cache — survives app restarts, invalidated per player+round+year
       try {
-        const raw = await AsyncStorage.getItem(MATCHUP_STORAGE_KEY);
-        if (raw) {
-          const stored: Record<string, MatchupStats> = JSON.parse(raw);
-          if (stored[cacheKey]) return stored[cacheKey];
-        }
+        const stored = await getJson<MatchupStats>(cacheKey);
+        if (stored) return stored;
       } catch { /* ignore */ }
 
       const isHome = nextMatch.homeTeam === player.team.name;
@@ -392,12 +379,9 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
         venueAvg: calcAvg(venueScores),
       };
 
-      // 3. Persist to AsyncStorage for instant cold-start next time
+      // 3. Persist to SQLite for instant cold-start next time
       try {
-        const raw = await AsyncStorage.getItem(MATCHUP_STORAGE_KEY);
-        const stored: Record<string, MatchupStats> = raw ? JSON.parse(raw) : {};
-        stored[cacheKey] = result;
-        await AsyncStorage.setItem(MATCHUP_STORAGE_KEY, JSON.stringify(stored));
+        await setJson(cacheKey, result);
       } catch { /* ignore */ }
 
       return result;

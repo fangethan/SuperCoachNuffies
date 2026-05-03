@@ -1,14 +1,14 @@
 import { useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player } from '../types';
+import { getJson, setJson } from '../store/cache';
 
-const STORAGE_KEY = 'round_scores_v6';
+// Per-(year, round) cache entry. Keying by year+round means flipping between
+// rounds via the round picker doesn't blow away the previous round's cache.
+const RS_KEY = (year: number, round: number) => `rs:${year}_${round}`;
 
 interface StoredScores {
-  year: number;
-  round: number;
   scores: Record<number, PlayerRoundScores>;
 }
 
@@ -27,13 +27,9 @@ export function useRoundScores(
     queryKey: ['round-scores', 'v5', year, targetRound],
     queryFn: async () => {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const stored: StoredScores = JSON.parse(raw);
-          const hasValidScores = Object.values(stored.scores).some(s => s.lastScore > 0);
-          if (stored.year === year && stored.round === targetRound && hasValidScores) {
-            return stored.scores;
-          }
+        const stored = await getJson<StoredScores>(RS_KEY(year, targetRound));
+        if (stored && Object.values(stored.scores).some(s => s.lastScore > 0)) {
+          return stored.scores;
         }
       } catch { /* ignore storage errors */ }
 
@@ -44,8 +40,7 @@ export function useRoundScores(
       );
 
       try {
-        const payload: StoredScores = { year, round: targetRound, scores };
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+        await setJson<StoredScores>(RS_KEY(year, targetRound), { scores });
       } catch { /* ignore */ }
 
       return scores;

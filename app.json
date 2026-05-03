@@ -41,10 +41,15 @@
         {
           "photosPermission": "Pick a screenshot of your SuperCoach team so the app can read your players."
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "developmentClient": {
       "silentLaunch": true
+    },
+    "extra": {
+      "supabaseUrl": "REPLACE_WITH_PROJECT_URL",
+      "supabaseAnonKey": "REPLACE_WITH_ANON_KEY"
     }
   }
 }

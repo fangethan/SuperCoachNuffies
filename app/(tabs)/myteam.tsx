@@ -14,6 +14,7 @@ import { formatPrice } from '../../src/utils/scoring';
 import { PitchView } from '../../src/components/PitchView';
 import { TeamBadge } from '../../src/components/TeamBadge';
 import { parseTeamScreenshot, ParsedPlayer } from '../../src/utils/teamScreenshotParser';
+import { pushTeam } from '../../src/api/teamSync';
 
 const normName = (s: string) => s.toLowerCase().replace(/[^a-z]/g, '');
 
@@ -161,12 +162,25 @@ export default function MyTeamScreen() {
         if (sc.isBench) benchIds.push(p.id);
       });
 
-      setMyTeamIds(matched.map(p => p.id));
+      const teamIds = matched.map(p => p.id);
+      setMyTeamIds(teamIds);
       setMyBenchIds(benchIds);
       setMyTeamScPositions(scPositionMap);
       setMyTeamEmgIds([]);
       setScAuthToken('imported');
       setPendingPlayers([]);
+
+      // Push the imported team to Supabase so it follows the user across devices.
+      // Failure is non-fatal — the team is already saved locally; we just log so
+      // the next sync attempt has a chance.
+      pushTeam({
+        myTeamIds: teamIds,
+        myBenchIds: benchIds,
+        myTeamScPositions: scPositionMap,
+        myTeamEmgIds: [],
+        captainId: captainId,
+        vcId: vcId,
+      }).catch(err => console.warn('[MyTeam] pushTeam failed:', err));
     }
   }, [pendingPlayers, allPlayers]);
 

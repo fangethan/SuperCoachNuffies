@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Player, PositionFilter, SortOption } from '../types';
 import { CURRENT_ROUND, CURRENT_YEAR } from '../constants';
+import { pullTeam } from '../api/teamSync';
 
 const STORAGE_TEAM_IDS  = 'my_team_ids_v1';
 const STORAGE_BENCH_IDS = 'my_bench_ids_v1';
@@ -197,6 +198,8 @@ export const useAppStore = create<AppState>((set) => ({
   },
 
   hydrateFromStorage: async () => {
+    // 1. Local first — instant team render from disk so the UI doesn't wait
+    //    for the network.
     try {
       const [tokenRaw, idsRaw, benchRaw, scPosRaw, emgRaw] = await Promise.all([
         AsyncStorage.getItem(STORAGE_SC_TOKEN),
@@ -223,5 +226,30 @@ export const useAppStore = create<AppState>((set) => ({
         if (Array.isArray(ids)) set({ myTeamEmgIds: ids });
       }
     } catch { /* ignore */ }
+
+    // 2. Cloud second — if a Supabase row exists, it's the source of truth
+    //    (the user might have imported on another device). Overwrites local.
+    try {
+      const cloud = await pullTeam();
+      if (cloud) {
+        set({
+          myTeamIds: cloud.myTeamIds ?? [],
+          myBenchIds: cloud.myBenchIds ?? [],
+          myTeamScPositions: cloud.myTeamScPositions ?? {},
+          myTeamEmgIds: cloud.myTeamEmgIds ?? [],
+          captainId: cloud.captainId ?? null,
+          vcId: cloud.vcId ?? null,
+          scAuthToken: 'imported',
+        });
+        // Mirror to AsyncStorage so the next cold start renders the cloud
+        // version locally without waiting on the network.
+        AsyncStorage.setItem(STORAGE_TEAM_IDS, JSON.stringify(cloud.myTeamIds ?? [])).catch(() => {});
+        AsyncStorage.setItem(STORAGE_BENCH_IDS, JSON.stringify(cloud.myBenchIds ?? [])).catch(() => {});
+        AsyncStorage.setItem(STORAGE_SC_POS, JSON.stringify(cloud.myTeamScPositions ?? {})).catch(() => {});
+        AsyncStorage.setItem(STORAGE_EMG_IDS, JSON.stringify(cloud.myTeamEmgIds ?? [])).catch(() => {});
+      }
+    } catch (e) {
+      console.warn('[useAppStore] pullTeam failed during hydrate:', e);
+    }
   },
 }));
