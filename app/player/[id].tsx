@@ -5,7 +5,7 @@ import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatc
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
-import { COLORS, POSITIONS, CURRENT_YEAR, SC_PRICE_DIVISOR } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR, SC_DOLLARS_PER_POINT, SC_MAGIC } from '../../src/constants';
 import { footywireApi, MatchEntry } from '../../src/api/footywire';
 import { TeamBadge } from '../../src/components/TeamBadge';
 import { PlayerScoreChart } from '../../src/components/PlayerScoreChart';
@@ -129,8 +129,12 @@ export default function PlayerDetailScreen() {
       : avg;
 
     // BE_n = baseRatio × price_n − s[n-2] − s[n-1]
-    // Derived from the SuperCoach formula; startPrice cancels out of the derivation.
-    const baseRatio = (ppts + s_n2 + s_n1) / basePrice;
+    // baseRatio is a season-wide constant from the SC formula:
+    //   BE = (9 × price / SC_MAGIC) − s[n-2] − s[n-1]
+    // i.e. baseRatio = 9 / SC_MAGIC. Previously this was back-fitted per-player
+    // from one data point (ppts + s_n2 + s_n1) / basePrice, which only matched
+    // SC's actual ratio by luck for premium-priced players.
+    const baseRatio = 9 / SC_MAGIC;
 
     // Footywire uses season avg (not rolling avg) as the forward projection seed
     const gamesCount = stats.games > 0 ? stats.games : sortedPlayedRounds.length;
@@ -160,10 +164,12 @@ export default function PlayerDetailScreen() {
       else if (useVenue)       projScore = seasonAvg * 0.85 + venueAvg * 0.15;
       else                     projScore = seasonAvg;
 
-      // "On the bubble": no price change until the player's 3rd game is played
+      // "On the bubble": no price change until the player's 3rd game is played.
+      // SC actual formula: priceChange = (score - BE) × SC_MAGIC / 9, flat $/point,
+      // independent of the player's price.
       let change = 0;
       if (gamesPlayed >= 2) {
-        change = Math.round((projScore - chainBE) * (chainPrice / SC_PRICE_DIVISOR) / 100) * 100;
+        change = Math.round((projScore - chainBE) * SC_DOLLARS_PER_POINT / 100) * 100;
       }
       const newChainPrice = Math.max(0, chainPrice + change);
 

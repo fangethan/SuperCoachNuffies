@@ -96,10 +96,40 @@ export const CURRENT_YEAR = 2026;
 export const CURRENT_ROUND = 3;
 export const HISTORICAL_YEARS = [2025, 2024, 2023];
 
-// SuperCoach price-change divisor for the 2026 season.
-// Formula: priceChange = (score - breakeven) × (price / SC_PRICE_DIVISOR)
-// Meaning: 1 point above/below BE = price / SC_PRICE_DIVISOR dollars gained/lost.
-// Reverse-engineered from Footywire expected-price data; shifts slightly each season.
+// SuperCoach "magic number" for the 2026 season — the season-wide constant
+// that drives the price-change formula:
+//
+//   new_price = SC_MAGIC × (score_R + score_R-1 + score_R-2) / 9
+//   priceChange = (score - BE) × SC_MAGIC / 9                  (≈ flat $ per BE pt)
+//   BE          = (9 × price / SC_MAGIC) - score_R-1 - score_R-2
+//
+// Calibrated from observed round-8 data (Gawn, Xerri, Bonti, Retschko cluster
+// at magic ≈ 4070–4090). Per-point price impact ≈ SC_MAGIC / 9 ≈ $453 / point,
+// regardless of the player's price — the `(price / 1287)` heuristic the app
+// previously used badly under-predicted price changes for cheap players
+// (Retschko: predicted +$13k, actual +$62k) and slightly over-predicted for
+// expensive ones.
+export const SC_MAGIC = 4075;
+
+/** Dollar change per point of (score - BE). Equivalent to SC_MAGIC / 9. */
+export const SC_DOLLARS_PER_POINT = SC_MAGIC / 9;
+
+/**
+ * Starting-BE divisor. SuperCoach prices players for round 0 such that
+ *   starting_price = projected_avg × 5000
+ * so the breakeven shown for any player who hasn't played yet is exactly
+ *   starting_BE = round(starting_price / 5000)
+ *
+ * Verified against 7 unplayed-player data points (Cotton, Ludowyke, West,
+ * Archer, Green, Day, Conway — all cluster at price/BE ≈ 4,995). This is a
+ * SEPARATE constant from the in-season SC_MAGIC because SC uses different
+ * pricing mechanisms before vs after a player has scores on the board.
+ */
+export const SC_STARTING_BE_DIVISOR = 5000;
+
+// Old name kept as a deprecated alias for any consumer we missed during the
+// refactor. New code should use SC_MAGIC / SC_DOLLARS_PER_POINT instead.
+/** @deprecated use SC_MAGIC / SC_DOLLARS_PER_POINT */
 export const SC_PRICE_DIVISOR = 1287;
 
 // AFL team colours keyed by full team name (as returned by the API).

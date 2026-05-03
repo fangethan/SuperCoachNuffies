@@ -1,7 +1,38 @@
 import { Player, PlayerStats, Position, Team } from '../types';
 import { getEntry, setJson } from '../store/cache';
+import { SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../constants';
 
-const PLAYER_BE_KEY_PREFIX = 'be:';
+// Bumped to "be7:" after fixing the second-scored-round BE.
+//
+// SC's "on the bubble" rule: a player's price doesn't change until they've
+// played 3 matches. Price progression for the first three scored rounds:
+//   start of R0: starting price       (0 games played)
+//   start of R1: starting price       (1 game played — frozen)
+//   start of R2: starting price       (2 games played — frozen)
+//   start of R3: first changed price  (3 games played — unfreeze)
+//
+// So priceChange at R0 = priceChange at R1 = 0 → priceChange-derived BE
+// collapses. We use SC's bubble BE formula instead:
+//
+//   BE_R = 3 × proj_avg − S_{R-1} − S_{R-2}
+//
+// where proj_avg = price / 5000 (SC's starting-price → projected-average
+// convention) and missing prior rounds are filled in with proj_avg. That
+// gives:
+//   BE_R0 = 3·proj − proj − proj = proj_avg                  (no real priors)
+//   BE_R1 = 3·proj − S_R0 − proj = 2·proj_avg − S_R0         (1 real prior)
+//   BE_R2 = 3·proj − S_R1 − S_R0                             (2 real priors)
+//
+// Verified against Liam Henry (proj 32, scored 88 R8) → BE_R9 = 2·32−88
+// = −24 (SC published −22, ~rounding of proj_avg). And against Grundy
+// (proj ≈135) → BE_R0 = 135, BE_R1 = 2·135−117 = 153.
+//
+// For R2 the bubble formula and the priceChange formula AGREE numerically
+// (verified Grundy: R3 price drop $24,400 ⇒ BE_R2 = S_R2+54 ≈ 199 = bubble
+// formula's 3·135−89−117). So we only need the bubble fallback at indices
+// 0 and 1; R2 onwards the existing priceChange-based code recovers the
+// correct number.
+const PLAYER_BE_KEY_PREFIX = 'be7:';
 const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -841,8 +872,15 @@ async function fetchPlayerHistoricalScores(
 // ─── Per-round BE from price history ─────────────────────────────────────────
 // The player profile page has columns: Round | Price | Score | Value.
 // "Price" at round N is the price BEFORE that round's score is applied.
-// Formula: BE[N] = score[N] - (price[N+1] - price[N]) × 1287 / price[N]
-// For the last played round we fall back to the current published ppts.
+//
+// SuperCoach price-change formula (calibrated 2026):
+//     priceChange = (score - BE) × SC_DOLLARS_PER_POINT
+// Solving for BE:
+//     BE[N] = score[N] - (price[N+1] - price[N]) / SC_DOLLARS_PER_POINT
+//
+// For the last played round we *can't* derive BE (the formula needs the
+// upcoming round's price), so we fall back to Footywire's published currentBE
+// which is forward-looking — i.e. it represents the BE for round N+1, not N.
 async function fetchPlayerRoundBEs(
   firstName: string,
   lastName: string,
@@ -895,9 +933,20 @@ async function fetchPlayerRoundBEs(
 
   roundData.sort((a, b) => a.round - b.round);
 
-  // Find the index of the last row that actually has a score (null-score rows are
-  // price-only entries for byes or the upcoming unplayed round).
+  // Indices of the first two scored rows + the last scored row. Null-score
+  // rows (DNP, bye, or the upcoming unplayed round) are skipped from BE
+  // derivation but still hold valid prices we can reference. We track the
+  // SECOND scored row by skipping nulls between firstScoredIdx and itself,
+  // so a bye sandwiched between a player's 1st and 2nd played games is
+  // handled correctly.
+  let firstScoredIdx = -1;
+  let secondScoredIdx = -1;
   let lastScoredIdx = -1;
+  for (let i = 0; i < roundData.length; i++) {
+    if (roundData[i].score === null) continue;
+    if (firstScoredIdx < 0) firstScoredIdx = i;
+    else if (secondScoredIdx < 0) { secondScoredIdx = i; break; }
+  }
   for (let i = roundData.length - 1; i >= 0; i--) {
     if (roundData[i].score !== null) { lastScoredIdx = i; break; }
   }
@@ -907,16 +956,48 @@ async function fetchPlayerRoundBEs(
     const curr = roundData[i];
     if (curr.score === null) continue;
 
-    if (i === lastScoredIdx) {
-      // Last played round: anchor to the published current BE rather than using
-      // the formula (which would need the upcoming round's price and is unreliable).
-      if (currentBE !== 0) result[curr.round] = currentBE;
+    if (i === firstScoredIdx) {
+      // R0 (1st scored round): bubble formula collapses to proj_avg.
+      //   BE = 3·proj − proj − proj = proj_avg = price / 5000
+      result[curr.round] = Math.round(curr.price / SC_STARTING_BE_DIVISOR);
+    } else if (i === secondScoredIdx) {
+      // R1 (2nd scored round): price still frozen, so priceChange = 0 and
+      // the priceChange formula collapses to (BE = score). Use SC's bubble
+      // formula instead, with proj_avg filling in the missing R-2 round:
+      //   BE = 3·proj − S_{R-1} − proj = 2·proj − S_R0
+      // proj_avg comes from the starting price (which equals curr.price
+      // here since we're still in the bubble — R1 price is frozen at R0
+      // price). Reading from roundData[firstScoredIdx].price keeps the
+      // intent clear and is robust if a DNP sits between firstScoredIdx
+      // and secondScoredIdx.
+      const projAvg = roundData[firstScoredIdx].price / SC_STARTING_BE_DIVISOR;
+      const sFirst = roundData[firstScoredIdx].score ?? 0;
+      result[curr.round] = Math.round(2 * projAvg - sFirst);
+    } else if (i === lastScoredIdx) {
+      // Last played round: try the formula if Footywire has already published
+      // the upcoming round's price row (typically Tuesday post-round). When the
+      // row exists, roundData[i+1].price gives us P_{N+1} and we can derive
+      // BE_N normally. When it doesn't (mid-round, prices not yet published),
+      // round N's BE stays absent until the next refetch.
+      if (i + 1 < roundData.length) {
+        const priceChange = roundData[i + 1].price - curr.price;
+        result[curr.round] = Math.round(curr.score - (priceChange / SC_DOLLARS_PER_POINT));
+      }
     } else {
       // All earlier rounds: derive BE from the actual price change that followed.
       // roundData[i+1].price is valid even when round i+1 has no score (bye/DNP).
+      // Flat $/point factor — does NOT scale with player price (the previous
+      // (price/1287) heuristic mispriced cheap players badly).
       const priceChange = roundData[i + 1].price - curr.price;
-      result[curr.round] = Math.round(curr.score - (priceChange * 1287 / curr.price));
+      result[curr.round] = Math.round(curr.score - (priceChange / SC_DOLLARS_PER_POINT));
     }
+  }
+
+  // After the loop, store currentBE under the UPCOMING round (last-scored + 1).
+  // Footywire publishes currentBE as a forward-looking value — i.e. the BE the
+  // player needs in the next round to maintain price.
+  if (lastScoredIdx >= 0 && currentBE !== 0) {
+    result[roundData[lastScoredIdx].round + 1] = currentBE;
   }
 
   try {
