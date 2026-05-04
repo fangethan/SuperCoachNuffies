@@ -17,8 +17,8 @@ const AVG_COLOR = COLORS.textSecondary;
 const CHART_H    = 160;
 const Y_AXIS_W   = 35;
 const INIT_SPACE = 4;
-const INTRA      = 1;
-const INTER      = 4;
+// INTRA / INTER are computed per-render based on n — see inside the
+// component. These re-export the default values for short histories.
 const N_SECTIONS = 4;
 
 type Series   = 'score' | 'avg' | 'be';
@@ -45,10 +45,21 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
   );
   const n = allRounds.length;
 
-  // Use measured container width; fall back to 0 until first layout pass
+  // Use measured container width; fall back to 0 until first layout pass.
   const chartWidth  = containerW > 0 ? containerW : 0;
   const available   = chartWidth - Y_AXIS_W - INIT_SPACE;
-  const barW        = Math.max(3, Math.min(8,
+
+  // Spacing scales with round count so dense charts (24 rounds) don't
+  // hand most of their width to gaps. INTRA = gap between the two bars
+  // of one round (score / avg); INTER = gap between rounds. The bar-
+  // width cap is raised in lockstep so short histories also benefit
+  // (an 8-round chart now gets chunky 14px bars instead of being
+  // capped at 8 with lots of dead space).
+  const INTRA = n > 16 ? 0 : 1;
+  const INTER = n > 16 ? 2 : 4;
+  const BAR_CAP = n > 16 ? 12 : 14;
+
+  const barW        = Math.max(3, Math.min(BAR_CAP,
     Math.floor((available - (INTRA + INTER) * n) / (n * 2)),
   ));
   const groupStride = 2 * barW + INTRA + INTER;
@@ -125,6 +136,18 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
     return CHART_H + (-val / stepValue) * stepHeight;
   };
 
+  // Label-skip factor: at high round counts the per-label horizontal slot
+  // becomes narrower than a 2-digit number at fontSize 9. Showing every
+  // Nth label trims the count, and we widen each visible label's text
+  // slot via labelTextStyle.width so it can extend past its bar group
+  // without clipping. Always keep the last round labelled so the user
+  // sees where the chart ends.
+  const labelSkip = n > 22 ? 3 : n > 16 ? 2 : 1;
+  // Width budget per visible label = (skip × group stride) - margin.
+  // 18 is enough for "23" at fontSize 9; cap at 30 to avoid huge slots
+  // for short histories where labelSkip = 1.
+  const labelWidth = Math.min(30, Math.max(18, labelSkip * groupStride - 2));
+
   const chartData = useMemo(() => {
     const data: any[] = [];
     allRounds.forEach((r, idx) => {
@@ -134,13 +157,23 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
       const avgActive   = selected?.idx === idx && selected?.type === 'avg';
       const anySelected = selected !== null;
       const runAvg      = runningAvgs[idx];
+      const showLabel   = idx % labelSkip === 0 || isLast;
 
       data.push({
         value:      isPlayed ? perRoundScores[r] : 0,
         frontColor: !isPlayed ? 'transparent'
           : scoreHidden ? `${COLORS.success}18`
           : anySelected && !scoreActive ? `${COLORS.success}28` : COLORS.success,
-        label:      String(r),
+        label:      showLabel ? String(r) : '',
+        // Explicit text slot so the label isn't clipped to the narrow
+        // bar-group width when n is large. Negative left margin centres
+        // the wider text slot on the bar.
+        labelTextStyle: {
+          ...styles.axisText,
+          width: labelWidth,
+          marginLeft: -(labelWidth - barW) / 2,
+          textAlign: 'center' as const,
+        },
         spacing:    INTRA,
         barWidth:   barW,
       });
@@ -155,7 +188,7 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
       });
     });
     return data;
-  }, [allRounds, perRoundScores, runningAvgs, barW, n, selected, scoreHidden, avgHidden]);
+  }, [allRounds, perRoundScores, runningAvgs, barW, n, labelSkip, labelWidth, selected, scoreHidden, avgHidden]);
 
   // All hooks above — safe to return early now
   if (n === 0) return null;

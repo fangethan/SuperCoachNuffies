@@ -1,7 +1,14 @@
 import { Player, PlayerStats, Position, Team } from '../types';
 import { getEntry, getJson, setJson } from '../store/cache';
 import { CURRENT_YEAR } from '../constants';
-import { deriveBEMap, splitBEMap, RoundDataRow } from '../utils/beDerivation';
+import {
+  deriveBEMap,
+  splitBEMap,
+  computeSeasonSummary,
+  RoundDataRow,
+  PlayerSeasonSummary,
+  emptySeasonSummary,
+} from '../utils/beDerivation';
 
 // Bumped to "be7:" after fixing the second-scored-round BE.
 //
@@ -895,6 +902,90 @@ async function fetchPlayerHistoricalScores(
   return result;
 }
 
+// ─── Player profile page parsing ─────────────────────────────────────────────
+// The /afl/footy/pu-{team}--{slug} page lists rounds for ALL years (current
+// season first, prior seasons below). We detect year boundaries by watching
+// for the round number resetting (going backwards), then collect rows for
+// the target year only. This is the ONLY Footywire endpoint that reliably
+// returns year-specific stats; the listing pages (supercoach_breakevens
+// etc.) silently serve current-year data for past years.
+async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<RoundDataRow[]> {
+  const html = await fetchWithRetry(
+    `https://www.footywire.com/afl/footy/${slug}`,
+  ).catch(() => '');
+
+  const roundData: RoundDataRow[] = [];
+  let curYear = year;
+  let prevRound = -1;
+
+  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const cells = extractCells(m[1]);
+    if (cells.length < 3) continue;
+    const round = parseInt(cells[0], 10);
+    if (isNaN(round) || round < 0 || round > 30) continue;
+    const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
+    // Floor: SC's minimum player price is $99,100. The threshold must sit
+    // below that or we silently drop every rookie's bubble rounds (R1/R2
+    // at $99.1k), which slides the firstScoredIdx forward and produces a
+    // wrong starting BE. 50,000 still rejects garbage rows.
+    if (isNaN(price) || price < 50_000) continue;
+
+    if (prevRound >= 0 && round <= prevRound) {
+      curYear--;
+      if (curYear < year) break;                 // passed target year, stop
+    }
+    prevRound = round;
+
+    if (curYear === year) {
+      const s = (cells[2] ?? '').trim();
+      const score = s && s !== '--' && s !== 'DNP' ? parseInt(s, 10) : null;
+      roundData.push({ round, price, score: score !== null && !isNaN(score) ? score : null });
+    }
+  }
+
+  roundData.sort((a, b) => a.round - b.round);
+  return roundData;
+}
+
+// Cached aggregate of one player's season — derived from their profile page
+// (the per-year reliable source) rather than the listing pages. Past seasons
+// are immutable so the row goes in permanently; the current year stays on a
+// short TTL since prices/scores still move week to week.
+const PSH_KEY_PREFIX = 'psh:';
+const PSH_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
+
+async function fetchPlayerSeasonSummary(
+  firstName: string,
+  lastName: string,
+  teamName: string,
+  year: number,
+): Promise<PlayerSeasonSummary> {
+  const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
+  if (!slug) return emptySeasonSummary();
+
+  const cacheKey     = `${PSH_KEY_PREFIX}${slug}_${year}`;
+  const isCurrentYear = year === CURRENT_YEAR;
+
+  try {
+    const cached = await getEntry<PlayerSeasonSummary>(cacheKey);
+    if (cached) {
+      if (!isCurrentYear) return cached.value;     // permanent
+      if (Date.now() - cached.updatedAt < PSH_TTL) return cached.value;
+    }
+  } catch { /* ignore */ }
+
+  const roundData = await fetchPlayerProfileRoundData(slug, year);
+  const summary = computeSeasonSummary(roundData);
+
+  try {
+    await setJson(cacheKey, summary, { permanent: !isCurrentYear });
+  } catch { /* ignore */ }
+
+  return summary;
+}
+
 // ─── Per-round BE from price history ─────────────────────────────────────────
 // The player profile page has columns: Round | Price | Score | Value.
 // "Price" at round N is the price BEFORE that round's score is applied.
@@ -935,43 +1026,7 @@ async function fetchPlayerRoundBEs(
     }
   } catch { /* ignore */ }
 
-  const html = await fetchWithRetry(
-    `https://www.footywire.com/afl/footy/${slug}`
-  ).catch(() => '');
-
-  // Collect rows for the target year (page leads with current year, older years follow)
-  const roundData: RoundDataRow[] = [];
-  let curYear = year;
-  let prevRound = -1;
-
-  const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let m: RegExpExecArray | null;
-  while ((m = rowRe.exec(html)) !== null) {
-    const cells = extractCells(m[1]);
-    if (cells.length < 3) continue;
-    const round = parseInt(cells[0], 10);
-    if (isNaN(round) || round < 0 || round > 30) continue;
-    const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
-    // Floor: SC's minimum player price is $99,100. The threshold must sit
-    // below that or we silently drop every rookie's bubble rounds (R1/R2
-    // at $99.1k), which slides the firstScoredIdx forward and produces a
-    // wrong starting BE. 50,000 still rejects garbage rows.
-    if (isNaN(price) || price < 50_000) continue;
-
-    if (prevRound >= 0 && round <= prevRound) {
-      curYear--;
-      if (curYear < year) break; // passed target year, stop
-    }
-    prevRound = round;
-
-    if (curYear === year) {
-      const s = (cells[2] ?? '').trim();
-      const score = s && s !== '--' && s !== 'DNP' ? parseInt(s, 10) : null;
-      roundData.push({ round, price, score: score !== null && !isNaN(score) ? score : null });
-    }
-  }
-
-  roundData.sort((a, b) => a.round - b.round);
+  const roundData = await fetchPlayerProfileRoundData(slug, year);
 
   // Pure derivation lives in src/utils/beDerivation.ts so it's testable.
   // See that file for formula details and edge cases.
@@ -1010,4 +1065,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, fetchPlayerRoundBEs, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, fetchPlayerRoundBEs, fetchPlayerSeasonSummary, normaliseName, lookupPlayer };

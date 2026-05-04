@@ -96,6 +96,70 @@ export function deriveBEMap(
  * `lastScoredRound + 1`. That entry can shift daily as Footywire updates
  * its projection, so it stays on the cache TTL. Everything else is locked.
  */
+/**
+ * Aggregate season-level stats derived from the per-player profile page
+ * (which supports a year selector that the listing pages do not). Used
+ * for the historical-mode player profile to back-fill avg / 3rd / 5rd /
+ * price / weekly + season change directly from the player's actual
+ * round-by-round history for that year, rather than the listing-page
+ * snapshot which silently returns current-year data.
+ */
+export interface PlayerSeasonSummary {
+  games: number;            // count of played rounds (score !== null)
+  totalPoints: number;
+  avg: number;              // 0 if games === 0
+  avg3: number;             // avg of last 3 played rounds (0 if <3)
+  avg5: number;
+  lastScore: number;        // most recent played round's score
+  lastRound: number;        // round number of the last row in the table
+  lastPrice: number;        // price at the last row in the table
+  startingPrice: number;    // first row's price (typically the rookie floor)
+  weeklyChange: number;     // change between the last two rows
+  totalChange: number;      // lastPrice − startingPrice
+}
+
+export function emptySeasonSummary(): PlayerSeasonSummary {
+  return {
+    games: 0, totalPoints: 0, avg: 0, avg3: 0, avg5: 0,
+    lastScore: 0, lastRound: 0, lastPrice: 0, startingPrice: 0,
+    weeklyChange: 0, totalChange: 0,
+  };
+}
+
+export function computeSeasonSummary(roundData: RoundDataRow[]): PlayerSeasonSummary {
+  if (roundData.length === 0) return emptySeasonSummary();
+
+  const playedRows = roundData.filter(r => r.score !== null);
+  const games = playedRows.length;
+  const totalPoints = playedRows.reduce((s, r) => s + (r.score ?? 0), 0);
+
+  const avgOfLast = (n: number) => {
+    const last = playedRows.slice(-n);
+    if (last.length === 0) return 0;
+    return last.reduce((s, r) => s + (r.score ?? 0), 0) / last.length;
+  };
+
+  const lastPlayed = playedRows[playedRows.length - 1];
+  const firstRow   = roundData[0];
+  const lastRow    = roundData[roundData.length - 1];
+
+  return {
+    games,
+    totalPoints,
+    avg:           games > 0 ? totalPoints / games : 0,
+    avg3:          avgOfLast(3),
+    avg5:          avgOfLast(5),
+    lastScore:     lastPlayed?.score ?? 0,
+    lastRound:     lastRow.round,
+    lastPrice:     lastRow.price,
+    startingPrice: firstRow.price,
+    weeklyChange:  roundData.length >= 2
+      ? lastRow.price - roundData[roundData.length - 2].price
+      : 0,
+    totalChange:   lastRow.price - firstRow.price,
+  };
+}
+
 export function splitBEMap(
   beMap: Record<number, number>,
   roundData: RoundDataRow[],

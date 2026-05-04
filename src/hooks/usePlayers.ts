@@ -100,6 +100,28 @@ export function useFilteredPlayers(
   });
 }
 
+/**
+ * Per-player season summary fetched from the profile page (the only
+ * Footywire endpoint that reliably year-filters). Use this for historical
+ * mode in the player profile — the listing-page-based usePlayers can't
+ * be trusted for past seasons because the listing pages silently return
+ * current-year data when given ?year=2025.
+ *
+ * Returns the empty summary (games = 0, all stats = 0) if the player has
+ * no rows for that year, which the profile screen should render as N/A.
+ */
+export function usePlayerHistoricalStats(player: Player | undefined, year: number) {
+  return useQuery({
+    queryKey: ['player-season-summary', 'v1', player?.id, year],
+    queryFn: () => footywireApi.fetchPlayerSeasonSummary(
+      player!.first_name, player!.last_name, player!.team.name, year,
+    ),
+    enabled: !!player,
+    staleTime: 1000 * 60 * 60 * 24,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function usePlayerRoundBEs(player: Player | undefined, year: number, ppts: number) {
   return useQuery<Record<number, number>>({
     queryKey: ['player-round-bes', 'v1', player?.id, year, ppts],

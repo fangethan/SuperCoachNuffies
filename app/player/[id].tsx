@@ -1,7 +1,7 @@
 import React, { Fragment, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
@@ -10,43 +10,76 @@ import { footywireApi, MatchEntry } from '../../src/api/footywire';
 import { TeamBadge } from '../../src/components/TeamBadge';
 import { PlayerScoreChart } from '../../src/components/PlayerScoreChart';
 
+// 2024 / 2025 ran 24 home-and-away rounds. We don't bother with finals
+// since SuperCoach pricing only counts the regular season anyway.
+const SEASON_YEARS = [2026, 2025, 2024];
+const HISTORICAL_LAST_ROUND = 24;
+
 export default function PlayerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const maxRound = useAppStore(s => s.maxRound);
-  const { data: players, isLoading } = usePlayers(CURRENT_YEAR, maxRound);
-  const { data: byeMap } = useByeRounds(CURRENT_YEAR);
+  const selectedYear = useAppStore(s => s.selectedYear);
+  const setSelectedYear = useAppStore(s => s.setSelectedYear);
+  const isHistorical = selectedYear !== CURRENT_YEAR;
+
+  // For historical seasons we use the end-of-regular-season round (24).
+  // For the current year we use the live maxRound.
+  const viewRound = isHistorical ? HISTORICAL_LAST_ROUND : maxRound;
+
+  const { data: players, isLoading } = usePlayers(selectedYear, viewRound);
+  const { data: byeMap } = useByeRounds(selectedYear);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById } = useRoundScores(CURRENT_YEAR, maxRound, players ?? []);
-  const { data: matchList } = useMatchList(CURRENT_YEAR);
+  const { data: roundScoresById } = useRoundScores(selectedYear, viewRound, players ?? []);
+  const { data: matchList } = useMatchList(selectedYear);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
+  const [yearModalOpen, setYearModalOpen] = useState(false);
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
   const playerId = player ? player.id : 0;
   const roundScores = roundScoresById[playerId];
-  const lastCompletedRound = Math.max(1, maxRound - 1);
+
+  // For the current year, the "last completed" round is one behind maxRound
+  // (which points at the live/upcoming round). For a closed historical
+  // season, every round is locked, so we use the end-of-season round.
+  const lastCompletedRound = isHistorical ? HISTORICAL_LAST_ROUND : Math.max(1, maxRound - 1);
   const lastRoundScore = (roundScores?.lastScore ?? 0) > 0 ? String(roundScores!.lastScore) : 'N/A';
 
-  // Hoist fwPlayer + ppts before hooks so they can be passed as arguments
+  // Hoist fwPlayer + ppts before hooks so they can be passed as arguments.
+  // In historical mode we don't use Footywire's currentBE (no live BE
+  // tracking for closed seasons) — pass 0 to skip the BE-derivation cache.
   const fwPlayerEarly = fwMap ? footywireApi.lookupPlayer(fwMap, player?.first_name ?? '', player?.last_name ?? '') : undefined;
-  const pptsEarly = fwPlayerEarly?.breakeven ?? stats?.ppts ?? 0;
+  const pptsEarly = isHistorical ? 0 : (fwPlayerEarly?.breakeven ?? stats?.ppts ?? 0);
 
-  // Compute nextMatch + all fixtures before early returns so hooks are unconditional
-  const nextMatch = matchList
+  // Compute nextMatch + all fixtures before early returns so hooks are unconditional.
+  // In historical mode none of these fire (no upcoming match for a finished season),
+  // but we still call the hooks so the hook order stays stable.
+  const nextMatch = !isHistorical ? matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
-    .sort((a, b) => a.round - b.round)[0];
+    .sort((a, b) => a.round - b.round)[0] : undefined;
   const { data: matchupStats } = useMatchupStats(player, nextMatch);
-  const { data: roundBEs } = usePlayerRoundBEs(player, CURRENT_YEAR, pptsEarly);
+  const { data: roundBEs } = usePlayerRoundBEs(player, selectedYear, pptsEarly);
 
-  const allFixtures = matchList
+  const allFixtures = !isHistorical ? (matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
-    .sort((a, b) => a.round - b.round) ?? [];
+    .sort((a, b) => a.round - b.round) ?? []) : [];
   const { data: fixtureProjections = {} } = useFixtureProjections(
     player,
     allFixtures,
     player?.player_stats?.[0]?.avg3 ?? 0,
     player?.player_stats?.[0]?.avg ?? 0,
   );
+
+  // Historical-mode summary derived from the player's profile page (the
+  // only Footywire endpoint that respects year filtering). When viewing
+  // 2025/2024 we override avg / 3rd / 5rd / price / weekly + season
+  // change with these values; the listing-page snapshot in `stats` is
+  // always current-year regardless of the URL year param.
+  const { data: histSummary } = usePlayerHistoricalStats(player, selectedYear);
+  const histPlayed = isHistorical && (histSummary?.games ?? 0) > 0;
+  // True when we're in historical mode and have decisively confirmed
+  // the player did not play that year — suppresses every stat below.
+  const histNoData = isHistorical && histSummary !== undefined && (histSummary?.games ?? 0) === 0;
 
   if (isLoading) {
     return (
@@ -57,6 +90,33 @@ export default function PlayerDetailScreen() {
   }
 
   if (!player || !stats) {
+    // In historical mode this most often means the player wasn't on an
+    // AFL list that year (rookie debuting in 2026, or someone retired
+    // before our viewYear). Surface that explicitly so the user sees
+    // why their stats are blank rather than a generic "not found".
+    if (isHistorical) {
+      return (
+        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+          <Stack.Screen options={{
+            title: '',
+            headerRight: () => (
+              <YearPickerButton year={selectedYear} onPress={() => setYearModalOpen(true)} />
+            ),
+          }} />
+          <View style={styles.notInSeason}>
+            <Text style={styles.notInSeasonText}>
+              Player was not part of the AFL in the {selectedYear} season
+            </Text>
+          </View>
+          <YearPickerModal
+            open={yearModalOpen}
+            onClose={() => setYearModalOpen(false)}
+            selectedYear={selectedYear}
+            onSelect={(y) => { setSelectedYear(y); setYearModalOpen(false); }}
+          />
+        </ScrollView>
+      );
+    }
     return (
       <View style={styles.centre}>
         <Text style={styles.errorText}>Player not found</Text>
@@ -191,7 +251,12 @@ export default function PlayerDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{ title: `${player.first_name} ${player.last_name}` }} />
+      <Stack.Screen options={{
+        title: `${player.first_name} ${player.last_name}`,
+        headerRight: () => (
+          <YearPickerButton year={selectedYear} onPress={() => setYearModalOpen(true)} />
+        ),
+      }} />
       {/* Header */}
       <View style={styles.header}>
         <TeamBadge teamName={player.team?.name ?? ''} size={46} />
@@ -234,45 +299,98 @@ export default function PlayerDetailScreen() {
         ) : null}
       </View>
 
-      {/* Key stats row */}
+      {/* Key stats row. In historical mode every value is sourced from
+          the per-player profile-page summary (the only year-aware
+          Footywire endpoint). When that summary reports 0 games we know
+          the player did not play that year — render N/A across the
+          board rather than letting current-season stats leak through. */}
       <View style={styles.statsGrid}>
-        <StatBox label={`Rnd ${lastCompletedRound}`} value={lastRoundScore} large />
-        <StatBox label="Season Avg" value={avg.toFixed(1)} large />
-        <StatBox label="3 Rd Avg" value={avg3 > 0 ? avg3.toFixed(1) : 'N/A'} large />
-        <StatBox label="5 Rd Avg" value={avg5 > 0 ? avg5.toFixed(1) : 'N/A'} large />
+        <StatBox
+          label={`Rnd ${isHistorical ? (histSummary?.lastRound ?? lastCompletedRound) : lastCompletedRound}`}
+          value={
+            isHistorical
+              ? (histPlayed ? String(histSummary!.lastScore) : 'N/A')
+              : lastRoundScore
+          }
+          large
+        />
+        <StatBox
+          label="Season Avg"
+          value={
+            isHistorical
+              ? (histPlayed ? histSummary!.avg.toFixed(1) : 'N/A')
+              : (avg > 0 ? avg.toFixed(1) : 'N/A')
+          }
+          large
+        />
+        <StatBox
+          label="3 Rd Avg"
+          value={
+            isHistorical
+              ? (histPlayed && histSummary!.avg3 > 0 ? histSummary!.avg3.toFixed(1) : 'N/A')
+              : (avg3 > 0 ? avg3.toFixed(1) : 'N/A')
+          }
+          large
+        />
+        <StatBox
+          label="5 Rd Avg"
+          value={
+            isHistorical
+              ? (histPlayed && histSummary!.avg5 > 0 ? histSummary!.avg5.toFixed(1) : 'N/A')
+              : (avg5 > 0 ? avg5.toFixed(1) : 'N/A')
+          }
+          large
+        />
       </View>
 
-      {/* Price row */}
+      {/* Price row: in historical mode the values come from histSummary;
+          if the player didn't play that year, all three render N/A. */}
       <View style={styles.priceRow}>
         <View style={styles.priceBox}>
           <Text style={styles.priceLabel}>Price</Text>
-          <Text style={styles.priceValue}>{formatPrice(stats.price ?? 0)}</Text>
-        </View>
-        <View style={styles.priceBox}>
-          <Text style={styles.priceLabel}>Change</Text>
-          <Text style={[
-            styles.priceValue,
-            priceDir === 'up' ? styles.up : priceDir === 'down' ? styles.down : styles.neutral,
-          ]}>
-            {weeklyPriceChange !== 0 ? formatPriceChange(weeklyPriceChange) : '-'}
+          <Text style={styles.priceValue}>
+            {histNoData
+              ? 'N/A'
+              : formatPrice(isHistorical ? (histSummary?.lastPrice ?? 0) : (stats.price ?? 0))}
           </Text>
-          {totalPriceChange !== 0 ? (
-            <Text style={[
-              styles.priceTotal,
-              totalPriceDir === 'up' ? styles.up : totalPriceDir === 'down' ? styles.down : styles.neutral,
-            ]}>
-              ({formatPriceChange(totalPriceChange)})
-            </Text>
-          ) : null}
         </View>
         <View style={styles.priceBox}>
-          <Text style={styles.priceLabel}>Owned</Text>
-          <Text style={styles.priceValue}>{(stats.owned ?? 0).toFixed(1)}%</Text>
+          <Text style={styles.priceLabel}>Weekly Change</Text>
+          {(() => {
+            const change  = isHistorical ? (histSummary?.weeklyChange ?? 0) : weeklyPriceChange;
+            const dir     = getPriceDirection(change);
+            const display = histNoData ? 'N/A' : (change !== 0 ? formatPriceChange(change) : '-');
+            return (
+              <Text style={[
+                styles.priceValue,
+                dir === 'up' ? styles.up : dir === 'down' ? styles.down : styles.neutral,
+              ]}>
+                {display}
+              </Text>
+            );
+          })()}
+        </View>
+        <View style={styles.priceBox}>
+          <Text style={styles.priceLabel}>Season Change</Text>
+          {(() => {
+            const change  = isHistorical ? (histSummary?.totalChange ?? 0) : totalPriceChange;
+            const dir     = getPriceDirection(change);
+            const display = histNoData ? 'N/A' : (change !== 0 ? formatPriceChange(change) : '-');
+            return (
+              <Text style={[
+                styles.priceValue,
+                dir === 'up' ? styles.up : dir === 'down' ? styles.down : styles.neutral,
+              ]}>
+                {display}
+              </Text>
+            );
+          })()}
         </View>
       </View>
 
-      {/* Breakeven section */}
-      {ppts !== 0 ? (
+      {/* Breakeven section — only relevant for the live current season.
+          Closed seasons don't have a "next round" to break even against. */}
+      {!isHistorical && ppts !== 0 ? (
         <View style={[
           styles.beSection,
           beStatus === 'danger' ? styles.beDanger :
@@ -314,46 +432,48 @@ export default function PlayerDetailScreen() {
         </View>
       ) : null}
 
-      {/* Matchup */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>This Week's Matchup</Text>
-        {nextMatch ? (
-          <View style={styles.matchupRow}>
-            <View style={styles.matchupItem}>
-              <Text style={styles.matchupLabel}>vs</Text>
-              <Text style={styles.matchupValue}>
-                {nextMatch.homeTeam === player.team.name ? nextMatch.awayAbbrev : nextMatch.homeAbbrev}
-              </Text>
+      {/* Matchup — only relevant for an active season with upcoming games. */}
+      {!isHistorical ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>This Week's Matchup</Text>
+          {nextMatch ? (
+            <View style={styles.matchupRow}>
+              <View style={styles.matchupItem}>
+                <Text style={styles.matchupLabel}>vs</Text>
+                <Text style={styles.matchupValue}>
+                  {nextMatch.homeTeam === player.team.name ? nextMatch.awayAbbrev : nextMatch.homeAbbrev}
+                </Text>
+              </View>
+              <View style={styles.matchupItem}>
+                <Text style={styles.matchupLabel}>Opp Avg</Text>
+                <Text style={[
+                  styles.matchupValue,
+                  (matchupStats?.oppAvg ?? 0) > 75 ? styles.up
+                    : (matchupStats?.oppAvg ?? 0) > 0 && (matchupStats?.oppAvg ?? 0) < 60 ? styles.down
+                    : styles.neutral,
+                ]}>
+                  {(matchupStats?.oppAvg ?? 0) > 0 ? matchupStats!.oppAvg.toFixed(1) : '-'}
+                </Text>
+              </View>
+              <View style={styles.matchupItem}>
+                <Text style={styles.matchupLabel}>Venue</Text>
+                <Text style={styles.matchupValue}>{shortenVenue(nextMatch.venue) || '-'}</Text>
+              </View>
+              <View style={styles.matchupItem}>
+                <Text style={styles.matchupLabel}>Venue Avg</Text>
+                <Text style={styles.matchupValue}>
+                  {(matchupStats?.venueAvg ?? 0) > 0 ? matchupStats!.venueAvg.toFixed(1) : '-'}
+                </Text>
+              </View>
             </View>
-            <View style={styles.matchupItem}>
-              <Text style={styles.matchupLabel}>Opp Avg</Text>
-              <Text style={[
-                styles.matchupValue,
-                (matchupStats?.oppAvg ?? 0) > 75 ? styles.up
-                  : (matchupStats?.oppAvg ?? 0) > 0 && (matchupStats?.oppAvg ?? 0) < 60 ? styles.down
-                  : styles.neutral,
-              ]}>
-                {(matchupStats?.oppAvg ?? 0) > 0 ? matchupStats!.oppAvg.toFixed(1) : '-'}
-              </Text>
-            </View>
-            <View style={styles.matchupItem}>
-              <Text style={styles.matchupLabel}>Venue</Text>
-              <Text style={styles.matchupValue}>{shortenVenue(nextMatch.venue) || '-'}</Text>
-            </View>
-            <View style={styles.matchupItem}>
-              <Text style={styles.matchupLabel}>Venue Avg</Text>
-              <Text style={styles.matchupValue}>
-                {(matchupStats?.venueAvg ?? 0) > 0 ? matchupStats!.venueAvg.toFixed(1) : '-'}
-              </Text>
-            </View>
-          </View>
-        ) : (
-          <Text style={styles.matchupValue}>No upcoming games</Text>
-        )}
-      </View>
+          ) : (
+            <Text style={styles.matchupValue}>No upcoming games</Text>
+          )}
+        </View>
+      ) : null}
 
-      {/* Bye info */}
-      {futureByeRounds.length > 0 ? (
+      {/* Bye info — also live-season only. */}
+      {!isHistorical && futureByeRounds.length > 0 ? (
         <View style={styles.byeBox}>
           <Text style={styles.byeText}>
             {futureByeRounds.length === 1
@@ -363,25 +483,27 @@ export default function PlayerDetailScreen() {
         </View>
       ) : null}
 
-      {/* History / Fixtures */}
+      {/* History / Fixtures — Fixtures tab is hidden in historical mode
+          (no upcoming games for a closed season). */}
       <View style={styles.section}>
-        {/* Tab toggle */}
-        <View style={hfStyles.tabRow}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={[hfStyles.tabBtn, activeTab === 'history' && hfStyles.tabBtnActive]}
-            onPress={() => setActiveTab('history')}
-          >
-            <Text style={[hfStyles.tabLabel, activeTab === 'history' && hfStyles.tabLabelActive]}>History</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={[hfStyles.tabBtn, activeTab === 'fixtures' && hfStyles.tabBtnActive]}
-            onPress={() => setActiveTab('fixtures')}
-          >
-            <Text style={[hfStyles.tabLabel, activeTab === 'fixtures' && hfStyles.tabLabelActive]}>Fixtures</Text>
-          </TouchableOpacity>
-        </View>
+        {!isHistorical ? (
+          <View style={hfStyles.tabRow}>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[hfStyles.tabBtn, activeTab === 'history' && hfStyles.tabBtnActive]}
+              onPress={() => setActiveTab('history')}
+            >
+              <Text style={[hfStyles.tabLabel, activeTab === 'history' && hfStyles.tabLabelActive]}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[hfStyles.tabBtn, activeTab === 'fixtures' && hfStyles.tabBtnActive]}
+              onPress={() => setActiveTab('fixtures')}
+            >
+              <Text style={[hfStyles.tabLabel, activeTab === 'fixtures' && hfStyles.tabLabelActive]}>Fixtures</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
 
         {activeTab === 'history' && (
           <>
@@ -394,7 +516,7 @@ export default function PlayerDetailScreen() {
             </View>
             {history.length === 0 ? (
               <Text style={hfStyles.empty}>No completed games yet</Text>
-            ) : history.map(m => {
+            ) : history.map((m, idx) => {
               const isHome = m.homeTeam === player.team.name;
               const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
               const oppTeamName = isHome ? m.awayTeam : m.homeTeam;
@@ -403,7 +525,10 @@ export default function PlayerDetailScreen() {
               const result   = myScore > oppScore ? 'W' : myScore < oppScore ? 'L' : 'D';
               const sc       = perRoundScores[m.round] ?? 0;
               return (
-                <View key={m.round} style={hfStyles.row}>
+                // Compound key: in 2025 a team can have two matches sharing
+                // a round number (regular round 24 + first finals week
+                // sometimes labelled the same), so plain m.round collides.
+                <View key={`${m.round}-${m.homeTeam}-${m.awayTeam}-${idx}`} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
                   <View style={[hfStyles.oppCell, { width: 82 }]}>
                     <TeamBadge teamName={oppTeamName} size={16} />
@@ -437,7 +562,7 @@ export default function PlayerDetailScreen() {
             </View>
             {fixtures.length === 0 ? (
               <Text style={hfStyles.empty}>No remaining fixtures</Text>
-            ) : fixtures.map(m => {
+            ) : fixtures.map((m, idx) => {
               const isHome    = m.homeTeam === player.team.name;
               const oppAbbrev = isHome ? m.awayAbbrev : m.homeAbbrev;
               const oppTeamName = isHome ? m.awayTeam : m.homeTeam;
@@ -447,7 +572,7 @@ export default function PlayerDetailScreen() {
                 : proj.delta < 0 ? COLORS.danger
                 : COLORS.textMuted;
               return (
-                <View key={m.round} style={hfStyles.row}>
+                <View key={`${m.round}-${m.homeTeam}-${m.awayTeam}-${idx}`} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 34, textAlign: 'center' }]}>{m.round}</Text>
                   <View style={[hfStyles.oppCell, { width: 76 }]}>
                     <TeamBadge teamName={oppTeamName} size={16} />
@@ -478,21 +603,24 @@ export default function PlayerDetailScreen() {
         )}
       </View>
 
-      {/* Score chart — only render once there are played rounds */}
+      {/* Score chart — only render once there are played rounds. In
+          historical mode we drop the BE series (no live BE for closed
+          seasons) so the chart renders only Round Score + Avg. */}
       {Object.keys(perRoundScores).some(r => perRoundScores[Number(r)] > 0) ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Score History</Text>
           <PlayerScoreChart
             perRoundScores={perRoundScores}
-            perRoundBE={roundBEs}
+            perRoundBE={isHistorical ? undefined : roundBEs}
             avg={avg}
-            ppts={ppts}
+            ppts={isHistorical ? 0 : ppts}
           />
         </View>
       ) : null}
 
-      {/* Previous season — only show when data is available */}
-      {(player.previous_games ?? 0) > 0 ? (
+      {/* Previous season — only show when data is available, and skip
+          entirely in historical mode (the page is already historical). */}
+      {!isHistorical && (player.previous_games ?? 0) > 0 ? (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Previous Season</Text>
           <View style={styles.prevSeason}>
@@ -502,7 +630,65 @@ export default function PlayerDetailScreen() {
           </View>
         </View>
       ) : null}
+
+      <YearPickerModal
+        open={yearModalOpen}
+        onClose={() => setYearModalOpen(false)}
+        selectedYear={selectedYear}
+        onSelect={(y) => { setSelectedYear(y); setYearModalOpen(false); }}
+      />
     </ScrollView>
+  );
+}
+
+/**
+ * Compact year-picker control rendered in the screen header — plain text,
+ * no surrounding pill (matches the unstyled look of other header elements).
+ */
+function YearPickerButton({ year, onPress }: { year: number; onPress: () => void }) {
+  return (
+    <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.yearPickerBtn}>
+      <Text style={styles.yearPickerText}>{year} ▾</Text>
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * Bottom-sheet modal for picking the season to view. Lists every entry in
+ * SEASON_YEARS; the active year shows a check mark. Tapping a row commits
+ * via the parent's onSelect (which writes to the Zustand store) and the
+ * profile screen re-fetches against the new year.
+ */
+function YearPickerModal({
+  open, onClose, selectedYear, onSelect,
+}: {
+  open: boolean;
+  onClose: () => void;
+  selectedYear: number;
+  onSelect: (year: number) => void;
+}) {
+  return (
+    <Modal visible={open} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.modalOverlay} onPress={onClose}>
+        <Pressable style={styles.modalSheet} onPress={e => e.stopPropagation()}>
+          <Text style={styles.modalTitle}>Season</Text>
+          {SEASON_YEARS.map(year => {
+            const active = year === selectedYear;
+            return (
+              <TouchableOpacity
+                key={year}
+                style={[styles.modalItem, active && styles.modalItemActive]}
+                onPress={() => onSelect(year)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.modalItemText, active && styles.modalItemTextActive]}>{year}</Text>
+                {active && <Text style={styles.modalCheck}>✓</Text>}
+              </TouchableOpacity>
+            );
+          })}
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -627,6 +813,81 @@ const styles = StyleSheet.create({
   bePillWarning: { backgroundColor: COLORS.warning + '22' },
   bePillDanger: { backgroundColor: COLORS.danger + '22' },
   bePillText: { fontSize: 11, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: 0.5 },
+
+  // Year-picker modal — same shape as the Players-tab modal so the two
+  // pickers feel like the same control.
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalSheet: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    width: 220,
+    maxHeight: 420,
+    paddingTop: 16,
+    paddingBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    textAlign: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 16,
+  },
+  modalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+  },
+  modalItemActive: { backgroundColor: COLORS.primary + '18' },
+  modalItemText: { fontSize: 15, fontWeight: '600', color: COLORS.textSecondary },
+  modalItemTextActive: { color: COLORS.primary },
+  modalCheck: { fontSize: 13, color: COLORS.primary, fontWeight: '700' },
+
+  // Year picker — bare text in the header (no pill / background / border).
+  // Slightly larger font and a visible chevron gap so the touch target
+  // feels comfortable without needing extra chrome.
+  yearPickerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    marginRight: 12,
+  },
+  yearPickerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    letterSpacing: 0.3,
+  },
+
+  // "Player not in AFL that season" banner — shown when the player has
+  // no row in the historical year's data.
+  notInSeason: {
+    marginTop: 32,
+    padding: 24,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  notInSeasonText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
 });
 
 const hfStyles = StyleSheet.create({

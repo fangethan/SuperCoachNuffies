@@ -41,8 +41,6 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
   ppts: 'Breakeven',
 };
 
-const SEASON_YEARS = [2026, 2025, 2024];
-
 export default function PlayersScreen() {
   const {
     searchQuery, setSearchQuery,
@@ -50,7 +48,6 @@ export default function PlayersScreen() {
     maxRound, myTeamIds,
     showOwnedOnly, setShowOwnedOnly,
     showBubbleOnly, setShowBubbleOnly,
-    selectedYear, setSelectedYear,
     priceMin, priceMax, setPriceMin, setPriceMax,
     byeRoundFilters, toggleByeRoundFilter,
     resetFilters,
@@ -68,19 +65,14 @@ export default function PlayersScreen() {
   const [userPickedRound, setUserPickedRound] = useState<number | null>(null);
   const scoreRound = userPickedRound ?? lastCompletedRound;
   const [roundModalOpen, setRoundModalOpen] = useState(false);
-  const [yearModalOpen, setYearModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
 
   const navigation = useNavigation();
   useEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity activeOpacity={0.8} onPress={() => setYearModalOpen(true)} style={{ marginRight: 16 }}>
-          <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textSecondary }}>{selectedYear} ▾</Text>
-        </TouchableOpacity>
-      ),
-    });
-  }, [navigation, selectedYear]);
+    // The season picker now lives in the player profile header, not on
+    // the Players tab — this tab always shows the current season.
+    navigation.setOptions({});
+  }, [navigation]);
 
   const { data: players, isLoading, error } = usePlayers(CURRENT_YEAR, maxRound);
   const { data: byeMap } = useByeRounds(CURRENT_YEAR);
@@ -339,33 +331,6 @@ export default function PlayersScreen() {
                 );
               })}
             </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* Year picker modal */}
-      <Modal visible={yearModalOpen} transparent animationType="fade" onRequestClose={() => setYearModalOpen(false)}>
-        <Pressable style={styles.modalOverlay} onPress={() => setYearModalOpen(false)}>
-          <Pressable style={styles.modalSheet} onPress={e => e.stopPropagation()}>
-            <Text style={styles.modalTitle}>Season</Text>
-            {SEASON_YEARS.map(year => {
-              const active = year === selectedYear;
-              const isFuture = year !== 2026;
-              return (
-                <TouchableOpacity
-                  key={year}
-                  style={[styles.modalItem, active && styles.modalItemActive]}
-                  onPress={() => { setSelectedYear(year); setYearModalOpen(false); }}
-                  activeOpacity={0.7}
-                >
-                  <View>
-                    <Text style={[styles.modalItemText, active && styles.modalItemTextActive]}>{year}</Text>
-                    {isFuture && <Text style={styles.modalItemSub}>Coming soon</Text>}
-                  </View>
-                  {active && <Text style={styles.modalCheck}>✓</Text>}
-                </TouchableOpacity>
-              );
-            })}
           </Pressable>
         </Pressable>
       </Modal>
