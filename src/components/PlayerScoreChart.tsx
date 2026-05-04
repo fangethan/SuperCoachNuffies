@@ -15,8 +15,12 @@ const BE_COLOR  = '#c084fc';
 const AVG_COLOR = COLORS.textSecondary;
 
 const CHART_H    = 160;
-const Y_AXIS_W   = 35;
-const INIT_SPACE = 4;
+// Y_AXIS_W is the width of the y-axis label column. 22 fits "200" at
+// fontSize 9 with a couple of pixels of breathing room; going below 20
+// starts cutting into the numerals. INIT_SPACE was 4 — every pt counts
+// on a 390pt phone, so we take it down to 2.
+const Y_AXIS_W   = 22;
+const INIT_SPACE = 2;
 // INTRA / INTER are computed per-render based on n — see inside the
 // component. These re-export the default values for short histories.
 const N_SECTIONS = 4;
@@ -55,8 +59,13 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
   // width cap is raised in lockstep so short histories also benefit
   // (an 8-round chart now gets chunky 14px bars instead of being
   // capped at 8 with lots of dead space).
+  //
+  // Tuning notes for n=24 on iPhone 13 (390pt screen, ~314px chart
+  // canvas after padding + Y axis): INTRA=0 INTER=1 lands barW at 6,
+  // which is the sweet spot before bar-pairs start visually merging
+  // with their neighbours.
   const INTRA = n > 16 ? 0 : 1;
-  const INTER = n > 16 ? 2 : 4;
+  const INTER = n > 16 ? 1 : 4;
   const BAR_CAP = n > 16 ? 12 : 14;
 
   const barW        = Math.max(3, Math.min(BAR_CAP,
@@ -251,9 +260,23 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
       <View>
         <BarChart
           data={chartData}
+          // gifted-charts treats `width` as the BAR CANVAS — the actual
+          // total component width = width + yAxisLabelWidth. So the
+          // canvas needs to be `chartWidth - Y_AXIS_W` to keep the
+          // total inside the container.
           width={chartWidth - Y_AXIS_W}
           height={CHART_H}
           spacing={INTER}
+          // Match the SVG overlay's INIT_SPACE so BE dots / tap targets
+          // line up with the actual bar positions. gifted-charts'
+          // default initialSpacing (~10) would push bars to the right
+          // of where our overlay expects them.
+          initialSpacing={INIT_SPACE}
+          // Remove the trailing padding gifted-charts adds after the
+          // last bar — the user wants round 24's bars to sit flush
+          // against the right side of the chart canvas, not 10+px shy
+          // of it.
+          endSpacing={0}
           yAxisLabelWidth={Y_AXIS_W}
           roundedTop
           hideRules

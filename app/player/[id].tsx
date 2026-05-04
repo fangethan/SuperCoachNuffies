@@ -81,6 +81,7 @@ export default function PlayerDetailScreen() {
   // the player did not play that year — suppresses every stat below.
   const histNoData = isHistorical && histSummary !== undefined && (histSummary?.games ?? 0) === 0;
 
+
   if (isLoading) {
     return (
       <View style={styles.centre}>
@@ -605,9 +606,12 @@ export default function PlayerDetailScreen() {
 
       {/* Score chart — only render once there are played rounds. In
           historical mode we drop the BE series (no live BE for closed
-          seasons) so the chart renders only Round Score + Avg. */}
+          seasons) so the chart renders only Round Score + Avg. The
+          chart section uses tighter horizontal padding than other
+          sections so a 24-round chart can keep the bars at a usable
+          width on a 390pt phone (iPhone 13). */}
       {Object.keys(perRoundScores).some(r => perRoundScores[Number(r)] > 0) ? (
-        <View style={styles.section}>
+        <View style={[styles.section, styles.chartSection]}>
           <Text style={styles.sectionTitle}>Score History</Text>
           <PlayerScoreChart
             perRoundScores={perRoundScores}
@@ -779,6 +783,9 @@ const styles = StyleSheet.create({
     padding: 14, marginBottom: 12,
     borderWidth: 1, borderColor: COLORS.border,
   },
+  // Chart override: tighter horizontal padding (8 instead of 14) so a
+  // 24-round chart on a 390pt phone gets ~12 more px of bar real estate.
+  chartSection: { paddingHorizontal: 8 },
   sectionTitle: { fontSize: 14, fontWeight: '700', color: COLORS.textSecondary, marginBottom: 12 },
   matchupRow: { flexDirection: 'row', alignItems: 'flex-start' },
   matchupItem: { flex: 1, alignItems: 'center' },
