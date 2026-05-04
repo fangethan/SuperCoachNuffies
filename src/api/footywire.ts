@@ -52,8 +52,11 @@ import {
 // Splitting like this means a stale live row triggers exactly one refetch
 // path (live), and the frozen half is reused without going to the network.
 // For a closed season (year != CURRENT_YEAR) we never write a live row.
-const PLAYER_BE_KEY_PREFIX_FROZEN = 'be8p:';
-const PLAYER_BE_KEY_PREFIX_LIVE   = 'be8:';
+// Bumped to be9 after the curYear fix in fetchPlayerProfileRoundData.
+// Past-season BE data cached under be8 was derived from mislabelled
+// current-year rows.
+const PLAYER_BE_KEY_PREFIX_FROZEN = 'be9p:';
+const PLAYER_BE_KEY_PREFIX_LIVE   = 'be9:';
 const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours, applies only to the live half
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -915,7 +918,14 @@ async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<
   ).catch(() => '');
 
   const roundData: RoundDataRow[] = [];
-  let curYear = year;
+  // Page leads with the latest (current) season's rows, then prior years
+  // below in descending order. We start the running cursor at CURRENT_YEAR
+  // and decrement on every detected year boundary (round number reset).
+  // The previous initialiser `curYear = year` was buggy: when asked for
+  // year=2025 it labelled the leading 2026 rows as 2025, then skipped the
+  // real 2025 section after decrementing. That mislabelled current-year
+  // data as historical and left every past-season summary wrong.
+  let curYear = CURRENT_YEAR;
   let prevRound = -1;
 
   const rowRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
@@ -953,7 +963,11 @@ async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<
 // (the per-year reliable source) rather than the listing pages. Past seasons
 // are immutable so the row goes in permanently; the current year stays on a
 // short TTL since prices/scores still move week to week.
-const PSH_KEY_PREFIX = 'psh:';
+// Bumped to "psh2:" after fixing fetchPlayerProfileRoundData's curYear
+// initialiser (was using the target year instead of CURRENT_YEAR, which
+// labelled the leading 2026 rows as the requested historical year and
+// poisoned every past-season summary in the cache).
+const PSH_KEY_PREFIX = 'psh2:';
 const PSH_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
 
 async function fetchPlayerSeasonSummary(
