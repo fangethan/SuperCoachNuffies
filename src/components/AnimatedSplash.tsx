@@ -83,9 +83,13 @@ export function AnimatedSplash({ onFinish }: Props) {
     inputRange: [0, 0.55, 1],
     outputRange: [width * 0.25, -width * 0.05, -width * 0.20],
   });
+  // End rotation is 330deg (= −30deg) so the ball settles at the same
+  // counter-clockwise tilt the footy has in the app icon — long axis
+  // sloping up to the right, not flat horizontal. Total spin is now
+  // 510deg (~1.4 turns), down from 540deg.
   const ballSpin = ballRotate.interpolate({
     inputRange: [0, 1],
-    outputRange: ['-180deg', '360deg'],
+    outputRange: ['-180deg', '330deg'],
   });
 
   const burstScale = burst.interpolate({
@@ -118,9 +122,14 @@ export function AnimatedSplash({ onFinish }: Props) {
               { translateY: ballTranslateY },
               { rotate: ballSpin },
             ],
+            // Ball fades IN as it leaves the kick spot (0 → 0.05) but
+            // never fades OUT — once it lands between the posts it
+            // sits there at full opacity through the celebration. The
+            // final overallFade at the end of the sequence is what
+            // dismisses the entire splash, ball included.
             opacity: ballX.interpolate({
-              inputRange: [0, 0.05, 0.85, 1],
-              outputRange: [0, 1, 1, 0],
+              inputRange: [0, 0.05, 1],
+              outputRange: [0, 1, 1],
             }),
           },
         ]}
