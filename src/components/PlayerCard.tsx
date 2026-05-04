@@ -80,8 +80,6 @@ export const PlayerCard = memo(function PlayerCard({ player, byeRounds, rank, is
           secondaryValue: total !== 0 ? { text: `(${formatPriceChange(total)})`, color: totalCol } : null,
         };
       }
-      case 'owned':
-        return { primaryValue: `${(stats.owned ?? 0).toFixed(1)}%`, primaryLabel: 'owned', primaryColor: COLORS.textPrimary };
       case 'ppts': {
         const be = fwBreakeven ?? stats.ppts ?? null;
         return {

@@ -168,7 +168,6 @@ export function useFilteredPlayers(
         diff = (sb.total_points ?? 0) - (sa.total_points ?? 0);
         break;
       }
-      case 'owned':  diff = (sb.owned ?? 0) - (sa.owned ?? 0); break;
       case 'ppts': {
         const abe = fwBreakevenById[a.id] ?? sa.ppts ?? null;
         const bbe = fwBreakevenById[b.id] ?? sb.ppts ?? null;

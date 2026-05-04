@@ -26,7 +26,6 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'Score', value: 'points' },   // label overridden in render with dynamic round
   { label: 'Price', value: 'price' },
   { label: '±$ Change', value: 'price_change' },
-  { label: 'Own%', value: 'owned' },
   { label: 'Breakeven', value: 'ppts' },
 ];
 
@@ -39,7 +38,6 @@ export const SORT_CARD_LABEL: Record<SortOption, string> = {
   points: 'Rnd Pts',
   price: 'price',
   price_change: '±$ Change',
-  owned: 'owned',
   ppts: 'Breakeven',
 };
 
@@ -58,9 +56,17 @@ export default function PlayersScreen() {
     resetFilters,
   } = useAppStore();
 
-  // Local round state — only used for "Rnd X Pts" sort, nothing else
+  // Local round state — only used for "Rnd X Pts" sort, nothing else.
+  // We can't seed useState with `maxRound - 1` directly: maxRound is
+  // CURRENT_ROUND on cold start (a stale fallback) and updates to the live
+  // round once the network detects it. useState only takes the initial
+  // value once, so a direct seed froze scoreRound at the stale value.
+  // Track "did the user pick?" instead — until they do, follow the live
+  // lastCompletedRound. Once they pick, their choice sticks even if
+  // maxRound changes later.
   const lastCompletedRound = Math.max(1, maxRound - 1);
-  const [scoreRound, setScoreRound] = useState(lastCompletedRound);
+  const [userPickedRound, setUserPickedRound] = useState<number | null>(null);
+  const scoreRound = userPickedRound ?? lastCompletedRound;
   const [roundModalOpen, setRoundModalOpen] = useState(false);
   const [yearModalOpen, setYearModalOpen] = useState(false);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
@@ -324,7 +330,7 @@ export default function PlayersScreen() {
                   <TouchableOpacity
                     key={r}
                     style={[styles.modalItem, active && styles.modalItemActive]}
-                    onPress={() => { setScoreRound(r); setRoundModalOpen(false); }}
+                    onPress={() => { setUserPickedRound(r); setRoundModalOpen(false); }}
                     activeOpacity={0.7}
                   >
                     <Text style={[styles.modalItemText, active && styles.modalItemTextActive]}>Round {r}</Text>

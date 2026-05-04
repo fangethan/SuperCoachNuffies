@@ -180,7 +180,6 @@ export type SortOption =
   | 'price'
   | 'price_change'
   | 'points'
-  | 'owned'
   | 'ppts'
   | 'total_pts';
 
