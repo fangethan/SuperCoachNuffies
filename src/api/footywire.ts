@@ -1,6 +1,7 @@
 import { Player, PlayerStats, Position, Team } from '../types';
 import { getEntry, getJson, setJson } from '../store/cache';
-import { CURRENT_YEAR, SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../constants';
+import { CURRENT_YEAR } from '../constants';
+import { deriveBEMap, splitBEMap, RoundDataRow } from '../utils/beDerivation';
 
 // Bumped to "be7:" after fixing the second-scored-round BE.
 //
@@ -939,7 +940,7 @@ async function fetchPlayerRoundBEs(
   ).catch(() => '');
 
   // Collect rows for the target year (page leads with current year, older years follow)
-  const roundData: Array<{ round: number; price: number; score: number | null }> = [];
+  const roundData: RoundDataRow[] = [];
   let curYear = year;
   let prevRound = -1;
 
@@ -972,91 +973,17 @@ async function fetchPlayerRoundBEs(
 
   roundData.sort((a, b) => a.round - b.round);
 
-  // Indices of the first two scored rows + the last scored row. Null-score
-  // rows (DNP, bye, or the upcoming unplayed round) are skipped from BE
-  // derivation but still hold valid prices we can reference. We track the
-  // SECOND scored row by skipping nulls between firstScoredIdx and itself,
-  // so a bye sandwiched between a player's 1st and 2nd played games is
-  // handled correctly.
-  let firstScoredIdx = -1;
-  let secondScoredIdx = -1;
-  let lastScoredIdx = -1;
-  for (let i = 0; i < roundData.length; i++) {
-    if (roundData[i].score === null) continue;
-    if (firstScoredIdx < 0) firstScoredIdx = i;
-    else if (secondScoredIdx < 0) { secondScoredIdx = i; break; }
-  }
-  for (let i = roundData.length - 1; i >= 0; i--) {
-    if (roundData[i].score !== null) { lastScoredIdx = i; break; }
-  }
-
-  const result: Record<number, number> = {};
-  for (let i = 0; i < roundData.length; i++) {
-    const curr = roundData[i];
-    if (curr.score === null) continue;
-
-    if (i === firstScoredIdx) {
-      // R0 (1st scored round): bubble formula collapses to proj_avg.
-      //   BE = 3·proj − proj − proj = proj_avg = price / 5000
-      result[curr.round] = Math.round(curr.price / SC_STARTING_BE_DIVISOR);
-    } else if (i === secondScoredIdx) {
-      // R1 (2nd scored round): price still frozen, so priceChange = 0 and
-      // the priceChange formula collapses to (BE = score). Use SC's bubble
-      // formula instead, with proj_avg filling in the missing R-2 round:
-      //   BE = 3·proj − S_{R-1} − proj = 2·proj − S_R0
-      // proj_avg comes from the starting price (which equals curr.price
-      // here since we're still in the bubble — R1 price is frozen at R0
-      // price). Reading from roundData[firstScoredIdx].price keeps the
-      // intent clear and is robust if a DNP sits between firstScoredIdx
-      // and secondScoredIdx.
-      const projAvg = roundData[firstScoredIdx].price / SC_STARTING_BE_DIVISOR;
-      const sFirst = roundData[firstScoredIdx].score ?? 0;
-      result[curr.round] = Math.round(2 * projAvg - sFirst);
-    } else if (i === lastScoredIdx) {
-      // Last played round: try the formula if Footywire has already published
-      // the upcoming round's price row (typically Tuesday post-round). When the
-      // row exists, roundData[i+1].price gives us P_{N+1} and we can derive
-      // BE_N normally. When it doesn't (mid-round, prices not yet published),
-      // round N's BE stays absent until the next refetch.
-      if (i + 1 < roundData.length) {
-        const priceChange = roundData[i + 1].price - curr.price;
-        result[curr.round] = Math.round(curr.score - (priceChange / SC_DOLLARS_PER_POINT));
-      }
-    } else {
-      // All earlier rounds: derive BE from the actual price change that followed.
-      // roundData[i+1].price is valid even when round i+1 has no score (bye/DNP).
-      // Flat $/point factor — does NOT scale with player price (the previous
-      // (price/1287) heuristic mispriced cheap players badly).
-      const priceChange = roundData[i + 1].price - curr.price;
-      result[curr.round] = Math.round(curr.score - (priceChange / SC_DOLLARS_PER_POINT));
-    }
-  }
-
-  // After the loop, store currentBE under the UPCOMING round (last-scored + 1).
-  // Footywire publishes currentBE as a forward-looking value — i.e. the BE the
-  // player needs in the next round to maintain price.
-  if (lastScoredIdx >= 0 && currentBE !== 0) {
-    result[roundData[lastScoredIdx].round + 1] = currentBE;
-  }
-
-  // Split the merged result into a frozen half (everything except the live
-  // currentBE row) and a live half (just that one row, current year only).
-  // Past seasons skip the live write entirely — every entry is frozen.
-  const liveRound = lastScoredIdx >= 0 ? roundData[lastScoredIdx].round + 1 : -1;
-  const frozenPart: Record<number, number> = {};
-  const livePart:   Record<number, number> = {};
-  for (const [k, be] of Object.entries(result)) {
-    const round = parseInt(k, 10);
-    if (isCurrentYear && round === liveRound) livePart[round] = be;
-    else frozenPart[round] = be;
-  }
+  // Pure derivation lives in src/utils/beDerivation.ts so it's testable.
+  // See that file for formula details and edge cases.
+  const result = deriveBEMap(roundData, currentBE);
+  const { frozen, live } = splitBEMap(result, roundData, isCurrentYear);
 
   try {
-    if (Object.keys(frozenPart).length > 0) {
-      await setJson(frozenKey, frozenPart, { permanent: true });
+    if (Object.keys(frozen).length > 0) {
+      await setJson(frozenKey, frozen, { permanent: true });
     }
-    if (isCurrentYear && Object.keys(livePart).length > 0) {
-      await setJson(liveKey, livePart);
+    if (isCurrentYear && Object.keys(live).length > 0) {
+      await setJson(liveKey, live);
     }
   } catch { /* ignore */ }
 
