@@ -2,10 +2,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supercoachApi } from '../api/supercoach';
 import { squiggleApi } from '../api/squiggle';
 import { footywireApi, PlayerRoundScores, MatchEntry } from '../api/footywire';
-import { Player, PositionFilter, SortOption } from '../types';
+import { Player } from '../types';
 import { useAppStore } from '../store/useAppStore';
 import { CURRENT_YEAR } from '../constants';
 import { getJson, setJson } from '../store/cache';
+import { applyPlayerFilters, applyPlayerSort } from '../utils/playerFilterSort';
 
 export { PlayerRoundScores };
 
@@ -78,111 +79,25 @@ export function useFilteredPlayers(
   scoreRound = 0,
   byeMap: Record<string, number[]> = {},
 ) {
-  const { positionFilter, sortBy, sortAscending, searchQuery, showOwnedOnly, showBubbleOnly, myTeamIds, priceMin, priceMax, byeRoundFilters } = useAppStore();
+  const {
+    positionFilter, sortBy, sortAscending, searchQuery,
+    showOwnedOnly, showBubbleOnly, myTeamIds, priceMin, priceMax,
+    byeRoundFilters,
+  } = useAppStore();
 
-  const getRoundScore = (id: number) =>
-    scoreRound > 0
-      ? (roundScoresById[id]?.roundScores?.[scoreRound] ?? 0)
-      : (roundScoresById[id]?.lastScore ?? 0);
-
-  let filtered = players;
-
-  if (showOwnedOnly && myTeamIds.length > 0) {
-    filtered = filtered.filter(p => myTeamIds.includes(p.id));
-  }
-
-  if (showBubbleOnly) {
-    filtered = filtered.filter(p => (p.player_stats?.[0]?.games ?? 0) <= 2);
-  }
-
-  // Price range — values in $k (floats); player prices are in dollars
-  if (priceMin > 95.0 || priceMax < 750.0) {
-    filtered = filtered.filter(p => {
-      const priceK = (p.player_stats?.[0]?.price ?? 0) / 1000;
-      const passMin = priceMin <= 95.0  || priceK >= priceMin;
-      const passMax = priceMax >= 750.0 || priceK <= priceMax;
-      return passMin && passMax;
-    });
-  }
-
-  // Bye round — filter OUT players whose team is on bye in any selected round
-  if (byeRoundFilters.length > 0 && Object.keys(byeMap).length > 0) {
-    filtered = filtered.filter(p => {
-      const teamByes = byeMap[p.team?.name ?? ''] ?? [];
-      return !byeRoundFilters.some(r => teamByes.includes(r));
-    });
-  }
-
-  if (positionFilter !== 'ALL') {
-    filtered = filtered.filter(p =>
-      p.positions?.some(pos => pos.position === positionFilter)
-    );
-  }
-
-  if (searchQuery.trim()) {
-    const q = searchQuery.toLowerCase();
-    filtered = filtered.filter(p =>
-      `${p.first_name} ${p.last_name}`.toLowerCase().includes(q) ||
-      p.team.name.toLowerCase().includes(q)
-    );
-  }
-
-  if (!roundScoresLoading) {
-    if (sortBy === 'avg3') {
-      filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
-    } else if (sortBy === 'avg5') {
-      filtered = filtered.filter(p => (roundScoresById[p.id]?.avg5 ?? 0) > 0);
-    } else if (sortBy === 'points') {
-      filtered = filtered.filter(p => getRoundScore(p.id) > 0);
-    }
-  } else if (sortBy === 'avg3') {
-    filtered = filtered.filter(p => (p.player_stats?.[0]?.avg3 ?? 0) > 0);
-  }
-
-  filtered = [...filtered].sort((a, b) => {
-    const sa = a.player_stats?.[0];
-    const sb = b.player_stats?.[0];
-    if (!sa || !sb) return 0;
-    let diff = 0;
-    switch (sortBy) {
-      case 'avg':    diff = (sb.avg ?? 0) - (sa.avg ?? 0); break;
-      case 'avg3':   diff = (sb.avg3 ?? 0) - (sa.avg3 ?? 0); break;
-      case 'avg5': {
-        const a5 = roundScoresById[a.id]?.avg5 ?? 0;
-        const b5 = roundScoresById[b.id]?.avg5 ?? 0;
-        diff = b5 - a5;
-        break;
-      }
-      case 'price':  diff = (sb.price ?? 0) - (sa.price ?? 0); break;
-      case 'price_change': {
-        const aChange = weeklyPriceMap[a.id] ?? sa.price_change ?? 0;
-        const bChange = weeklyPriceMap[b.id] ?? sb.price_change ?? 0;
-        diff = bChange - aChange;
-        break;
-      }
-      case 'points': {
-        diff = getRoundScore(b.id) - getRoundScore(a.id);
-        break;
-      }
-      case 'total_pts': {
-        diff = (sb.total_points ?? 0) - (sa.total_points ?? 0);
-        break;
-      }
-      case 'ppts': {
-        const abe = fwBreakevenById[a.id] ?? sa.ppts ?? null;
-        const bbe = fwBreakevenById[b.id] ?? sb.ppts ?? null;
-        if (abe === null && bbe === null) { diff = 0; break; }
-        if (abe === null) { diff = 1; break; }
-        if (bbe === null) { diff = -1; break; }
-        diff = bbe - abe;
-        break;
-      }
-      default: diff = 0;
-    }
-    return sortAscending ? -diff : diff;
+  // Pure filter + sort lives in src/utils/playerFilterSort.ts so it's
+  // unit-testable without rendering this hook. Pass everything the
+  // helpers need explicitly — they don't touch the store directly.
+  const filtered = applyPlayerFilters(players, {
+    positionFilter, searchQuery, showOwnedOnly, showBubbleOnly,
+    myTeamIds, priceMin, priceMax, byeRoundFilters, byeMap,
+    sortBy, scoreRound, roundScoresById, roundScoresLoading,
   });
 
-  return filtered;
+  return applyPlayerSort(filtered, {
+    sortBy, sortAscending, weeklyPriceMap,
+    fwBreakevenById, roundScoresById, scoreRound,
+  });
 }
 
 export function usePlayerRoundBEs(player: Player | undefined, year: number, ppts: number) {
