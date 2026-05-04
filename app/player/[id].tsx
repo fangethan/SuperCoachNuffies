@@ -1,7 +1,7 @@
 import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { useLocalSearchParams, Stack } from 'expo-router';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats, usePlayerRoundData } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
@@ -76,6 +76,24 @@ export default function PlayerDetailScreen() {
   // change with these values; the listing-page snapshot in `stats` is
   // always current-year regardless of the URL year param.
   const { data: histSummary } = usePlayerHistoricalStats(player, selectedYear);
+
+  // Raw per-round data (round / price / score) for the History table's
+  // weekly $ column. Same data source as histSummary; the hook caches
+  // separately so swapping years doesn't double-fetch the page.
+  const { data: roundData } = usePlayerRoundData(player, selectedYear);
+  // Map round → { price, weeklyDelta } so the row renderer can look up
+  // each round in O(1). Delta is current-row.price − previous-row.price
+  // (the change applied DURING this round). First round has no prior,
+  // so delta is 0 (chart shows '-' there).
+  const priceByRound = React.useMemo(() => {
+    const m = new Map<number, { price: number; delta: number }>();
+    if (!roundData) return m;
+    roundData.forEach((row, i) => {
+      const prev = i > 0 ? roundData[i - 1].price : row.price;
+      m.set(row.round, { price: row.price, delta: row.price - prev });
+    });
+    return m;
+  }, [roundData]);
   const histPlayed = isHistorical && (histSummary?.games ?? 0) > 0;
   // True when we're in historical mode and have decisively confirmed
   // the player did not play that year — suppresses every stat below.
@@ -509,11 +527,12 @@ export default function PlayerDetailScreen() {
         {activeTab === 'history' && (
           <>
             <View style={hfStyles.headerRow}>
-              <Text style={[hfStyles.headerCell, { width: 38 }]}>Rnd</Text>
-              <Text style={[hfStyles.headerCell, { width: 82 }]}>Opponent</Text>
+              <Text style={[hfStyles.headerCell, { width: 26, textAlign: 'center' }]}>Rnd</Text>
+              <Text style={[hfStyles.headerCell, { width: 72, marginLeft: 8 }]}>Opp</Text>
               <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
-              <Text style={[hfStyles.headerCell, { width: 80 }]}>Result</Text>
-              <Text style={[hfStyles.headerCell, { width: 32 }]}>SC</Text>
+              <Text style={[hfStyles.headerCell, { width: 60, textAlign: 'center', marginLeft: 4 }]}>Result</Text>
+              <Text style={[hfStyles.headerCell, { width: 26, textAlign: 'center', marginLeft: 4 }]}>SC</Text>
+              <Text style={[hfStyles.headerCell, { width: 64, textAlign: 'center', marginLeft: 4 }]}>Price</Text>
             </View>
             {history.length === 0 ? (
               <Text style={hfStyles.empty}>No completed games yet</Text>
@@ -525,27 +544,46 @@ export default function PlayerDetailScreen() {
               const oppScore = isHome ? m.awayScore! : m.homeScore!;
               const result   = myScore > oppScore ? 'W' : myScore < oppScore ? 'L' : 'D';
               const sc       = perRoundScores[m.round] ?? 0;
+              const priceRow = priceByRound.get(m.round);
+              const dollarColor = !priceRow ? COLORS.textMuted
+                : priceRow.delta > 0 ? COLORS.success
+                : priceRow.delta < 0 ? COLORS.danger
+                : COLORS.textMuted;
               return (
                 // Compound key: in 2025 a team can have two matches sharing
                 // a round number (regular round 24 + first finals week
                 // sometimes labelled the same), so plain m.round collides.
                 <View key={`${m.round}-${m.homeTeam}-${m.awayTeam}-${idx}`} style={hfStyles.row}>
-                  <Text style={[hfStyles.cell, { width: 38, textAlign: 'center' }]}>{m.round}</Text>
-                  <View style={[hfStyles.oppCell, { width: 82 }]}>
+                  <Text style={[hfStyles.cell, { width: 26, textAlign: 'center' }]}>{m.round}</Text>
+                  <View style={[hfStyles.oppCell, { width: 72, marginLeft: 7 }]}>
                     <TeamBadge teamName={oppTeamName} size={16} />
-                    <Text style={hfStyles.cell}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
+                    <Text style={hfStyles.cell} numberOfLines={1}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
                   </View>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
-                  <View style={{ width: 80, alignItems: 'center' }}>
+                  <View style={{ width: 60, alignItems: 'center', marginLeft: 4 }}>
                     <View style={[hfStyles.pill,
                       result === 'W' ? hfStyles.pillWin : result === 'L' ? hfStyles.pillLoss : hfStyles.pillDraw,
                     ]}>
                       <Text style={hfStyles.pillText}>{myScore}-{oppScore}</Text>
                     </View>
                   </View>
-                  <Text style={[hfStyles.cell, { width: 32, textAlign: 'center' }]}>
+                  <Text style={[hfStyles.cell, { width: 26, textAlign: 'center', marginLeft: 4 }]}>
                     {sc > 0 ? sc : '-'}
                   </Text>
+                  <View style={{ width: 64, alignItems: 'center', marginLeft: 4 }}>
+                    {priceRow ? (
+                      <>
+                        <Text style={[hfStyles.cell, { color: dollarColor, fontWeight: '700' }]} numberOfLines={1}>
+                          {formatPrice(priceRow.price)}
+                        </Text>
+                        <Text style={{ fontSize: 9, color: dollarColor }} numberOfLines={1}>
+                          {priceRow.delta !== 0 ? formatPriceChange(priceRow.delta) : '-'}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={[hfStyles.cell, { color: COLORS.textMuted }]}>-</Text>
+                    )}
+                  </View>
                 </View>
               );
             })}
@@ -558,8 +596,8 @@ export default function PlayerDetailScreen() {
               <Text style={[hfStyles.headerCell, { width: 34 }]}>Rnd</Text>
               <Text style={[hfStyles.headerCell, { width: 76 }]}>Opponent</Text>
               <Text style={[hfStyles.headerCell, { flex: 1 }]}>Venue</Text>
-              <Text style={[hfStyles.headerCell, { width: 54, textAlign: 'right' }]}>Proj Pts</Text>
-              <Text style={[hfStyles.headerCell, { width: 68, textAlign: 'right' }]}>Proj $</Text>
+              <Text style={[hfStyles.headerCell, { width: 64, textAlign: 'center' }]} numberOfLines={1}>Proj Pts</Text>
+              <Text style={[hfStyles.headerCell, { width: 68, textAlign: 'right', marginLeft: 10 }]} numberOfLines={1}>Proj $</Text>
             </View>
             {fixtures.length === 0 ? (
               <Text style={hfStyles.empty}>No remaining fixtures</Text>
@@ -575,15 +613,15 @@ export default function PlayerDetailScreen() {
               return (
                 <View key={`${m.round}-${m.homeTeam}-${m.awayTeam}-${idx}`} style={hfStyles.row}>
                   <Text style={[hfStyles.cell, { width: 34, textAlign: 'center' }]}>{m.round}</Text>
-                  <View style={[hfStyles.oppCell, { width: 76 }]}>
+                  <View style={[hfStyles.oppCell, { width: 76, marginLeft: 7 }]}>
                     <TeamBadge teamName={oppTeamName} size={16} />
                     <Text style={hfStyles.cell}>{oppAbbrev} ({isHome ? 'H' : 'A'})</Text>
                   </View>
                   <Text style={[hfStyles.cell, { flex: 1, textAlign: 'center' }]} numberOfLines={1}>{shortenVenue(m.venue)}</Text>
-                  <Text style={[hfStyles.cell, { width: 54, textAlign: 'right', color: COLORS.warning, fontWeight: '700' }]}>
+                  <Text style={[hfStyles.cell, { width: 64, textAlign: 'center', color: COLORS.warning, fontWeight: '700' }]}>
                     {proj ? proj.projScore : '-'}
                   </Text>
-                  <View style={{ width: 68, alignItems: 'flex-end' }}>
+                  <View style={{ width: 68, alignItems: 'flex-end', marginLeft: 10 }}>
                     {proj ? (
                       <>
                         <Text style={[hfStyles.cell, { color: projColor, fontWeight: '700' }]}>
@@ -925,19 +963,26 @@ const hfStyles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 9,
+    // Slightly taller than the original 9 to give the Price column's
+    // two-line stack (price + delta) breathing room without hugging
+    // the next row's border, but compact enough that single-line rows
+    // don't feel airy.
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border + '55',
   },
-  cell: { fontSize: 13, color: COLORS.textPrimary },
+  cell: { fontSize: 14, color: COLORS.textPrimary },
   oppCell: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   pill: {
-    borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4,
-    alignItems: 'center', justifyContent: 'center', minWidth: 64,
+    // Tightened from paddingHorizontal 8 / fontSize 11 / minWidth 64 —
+    // 7-char scores like "120-107" were exceeding 64px and forcing a
+    // line-wrap inside a column-width-constrained wrapper.
+    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3,
+    alignItems: 'center', justifyContent: 'center', minWidth: 56,
   },
   pillWin:  { backgroundColor: COLORS.success + '33', borderWidth: 1, borderColor: COLORS.success },
   pillLoss: { backgroundColor: COLORS.danger  + '33', borderWidth: 1, borderColor: COLORS.danger  },
   pillDraw: { backgroundColor: '#1e3a5f',              borderWidth: 1, borderColor: '#4a7fa5'      },
-  pillText: { fontSize: 11, fontWeight: '800', color: COLORS.textPrimary },
+  pillText: { fontSize: 10, fontWeight: '800', color: COLORS.textPrimary },
   empty: { fontSize: 13, color: COLORS.textMuted, paddingTop: 12, textAlign: 'center' },
 });

@@ -970,6 +970,41 @@ async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<
 const PSH_KEY_PREFIX = 'psh2:';
 const PSH_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
 
+// Same source data as the season summary, exposed as the raw
+// round-by-round rows. Used by the player profile's History table to
+// surface the per-round price + weekly $ change next to each game.
+const PRD_KEY_PREFIX = 'prd:';
+const PRD_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
+
+async function fetchPlayerRoundData(
+  firstName: string,
+  lastName: string,
+  teamName: string,
+  year: number,
+): Promise<RoundDataRow[]> {
+  const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
+  if (!slug) return [];
+
+  const cacheKey      = `${PRD_KEY_PREFIX}${slug}_${year}`;
+  const isCurrentYear = year === CURRENT_YEAR;
+
+  try {
+    const cached = await getEntry<RoundDataRow[]>(cacheKey);
+    if (cached) {
+      if (!isCurrentYear) return cached.value;       // permanent
+      if (Date.now() - cached.updatedAt < PRD_TTL) return cached.value;
+    }
+  } catch { /* ignore */ }
+
+  const roundData = await fetchPlayerProfileRoundData(slug, year);
+
+  try {
+    await setJson(cacheKey, roundData, { permanent: !isCurrentYear });
+  } catch { /* ignore */ }
+
+  return roundData;
+}
+
 async function fetchPlayerSeasonSummary(
   firstName: string,
   lastName: string,
@@ -1079,4 +1114,4 @@ function lookupPlayer(map: FootywireMap, firstName: string, lastName: string): F
   return lookupByNorm(map, normaliseName(`${firstName} ${lastName}`));
 }
 
-export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, fetchPlayerRoundBEs, fetchPlayerSeasonSummary, normaliseName, lookupPlayer };
+export const footywireApi = { fetchBreakevenMap, fetchAllPlayers, fetchRoundScoresBulk, fetchAllPlayerRoundScores, fetchMatchList, fetchPlayerHistoricalScores, fetchPlayerRoundBEs, fetchPlayerSeasonSummary, fetchPlayerRoundData, normaliseName, lookupPlayer };

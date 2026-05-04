@@ -101,6 +101,23 @@ export function useFilteredPlayers(
 }
 
 /**
+ * Raw per-round price/score history for a player+year, as parsed from
+ * Footywire's profile page. Used by the History table to display the
+ * per-week price column. Cached permanently for past seasons (immutable)
+ * and on a 6h TTL for the current year.
+ */
+export function usePlayerRoundData(player: Player | undefined, year: number) {
+  return useQuery({
+    queryKey: ['player-round-data', 'v1', player?.id, year],
+    queryFn: () => footywireApi.fetchPlayerRoundData(
+      player!.first_name, player!.last_name, player!.team.name, year,
+    ),
+    enabled: !!player,
+    staleTime: 1000 * 60 * 60 * 24,
+  });
+}
+
+/**
  * Per-player season summary fetched from the profile page (the only
  * Footywire endpoint that reliably year-filters). Use this for historical
  * mode in the player profile — the listing-page-based usePlayers can't
