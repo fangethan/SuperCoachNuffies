@@ -36,12 +36,23 @@ export async function getEntry<T>(key: string): Promise<CacheEntry<T> | null> {
   }
 }
 
-export async function setJson<T>(key: string, value: T): Promise<void> {
+/**
+ * Write a JSON payload. Pass `{ permanent: true }` for rows whose underlying
+ * fact can't change after the round it covers ended (past-round BEs,
+ * completed-round scores, prior-season matchup aggregates) — those rows skip
+ * the TTL check on read. Default behaviour stays TTL-based for live data.
+ */
+export async function setJson<T>(
+  key: string,
+  value: T,
+  opts?: { permanent?: boolean },
+): Promise<void> {
   const db = await getDb();
+  const permanent = opts?.permanent ? 1 : 0;
   await db.runAsync(
-    `insert into kv_blob (key, value, updated_at) values (?, ?, ?)
-     on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at`,
-    [key, JSON.stringify(value), Date.now()],
+    `insert into kv_blob (key, value, updated_at, permanent) values (?, ?, ?, ?)
+     on conflict(key) do update set value = excluded.value, updated_at = excluded.updated_at, permanent = excluded.permanent`,
+    [key, JSON.stringify(value), Date.now(), permanent],
   );
 }
 
@@ -50,10 +61,26 @@ export async function deleteJson(key: string): Promise<void> {
   await db.runAsync('delete from kv_blob where key = ?', [key]);
 }
 
-/** Returns true if a fresh entry exists (newer than maxAgeMs). */
+/** Returns true if a row exists and is either permanent or younger than maxAgeMs. */
 export async function isFresh(key: string, maxAgeMs: number): Promise<boolean> {
-  const entry = await getEntry<unknown>(key);
-  return !!entry && Date.now() - entry.updatedAt < maxAgeMs;
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ updated_at: number; permanent: number }>(
+    'select updated_at, permanent from kv_blob where key = ?',
+    [key],
+  );
+  if (!row) return false;
+  if (row.permanent) return true;
+  return Date.now() - row.updated_at < maxAgeMs;
+}
+
+/** Returns true if the row exists and is marked permanent (TTL-exempt). */
+export async function isPermanent(key: string): Promise<boolean> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ permanent: number }>(
+    'select permanent from kv_blob where key = ?',
+    [key],
+  );
+  return !!row?.permanent;
 }
 
 /** Bulk-delete every key with a given prefix (e.g. "be:" wipes all

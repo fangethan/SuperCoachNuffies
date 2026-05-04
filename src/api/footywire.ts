@@ -1,6 +1,6 @@
 import { Player, PlayerStats, Position, Team } from '../types';
-import { getEntry, setJson } from '../store/cache';
-import { SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../constants';
+import { getEntry, getJson, setJson } from '../store/cache';
+import { CURRENT_YEAR, SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../constants';
 
 // Bumped to "be7:" after fixing the second-scored-round BE.
 //
@@ -32,8 +32,21 @@ import { SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../constants';
 // formula's 3·135−89−117). So we only need the bubble fallback at indices
 // 0 and 1; R2 onwards the existing priceChange-based code recovers the
 // correct number.
-const PLAYER_BE_KEY_PREFIX = 'be7:';
-const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours
+// The BE map is split into two SQLite rows per (player, year):
+//
+//   be7p:{slug}_{year}   — frozen rounds (round ≤ lastScored). Permanent,
+//                          never expires. Past-season data lives entirely
+//                          here. Only refreshed if the file doesn't exist.
+//   be7:{slug}_{year}    — the live row, only the upcoming round's BE
+//                          (currentBE). TTL'd because Footywire updates it
+//                          daily as injuries/projections shift.
+//
+// Splitting like this means a stale live row triggers exactly one refetch
+// path (live), and the frozen half is reused without going to the network.
+// For a closed season (year != CURRENT_YEAR) we never write a live row.
+const PLAYER_BE_KEY_PREFIX_FROZEN = 'be7p:';
+const PLAYER_BE_KEY_PREFIX_LIVE   = 'be7:';
+const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours, applies only to the live half
 
 // ─── Public types ────────────────────────────────────────────────────────────
 
@@ -891,11 +904,21 @@ async function fetchPlayerRoundBEs(
   const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
   if (!slug) return {};
 
-  const cacheKey = `${PLAYER_BE_KEY_PREFIX}${slug}_${year}_${currentBE}`;
+  const isCurrentYear = year === CURRENT_YEAR;
+  const frozenKey = `${PLAYER_BE_KEY_PREFIX_FROZEN}${slug}_${year}`;
+  const liveKey   = `${PLAYER_BE_KEY_PREFIX_LIVE}${slug}_${year}`;
+
+  // Cache short-circuit. Frozen is permanent. For a closed season the
+  // frozen row is the whole story; for the current year we additionally
+  // need a fresh live row.
   try {
-    const cached = await getEntry<Record<number, number>>(cacheKey);
-    if (cached && Date.now() - cached.updatedAt < PLAYER_BE_TTL) {
-      return cached.value;
+    const frozen = await getJson<Record<number, number>>(frozenKey);
+    if (frozen) {
+      if (!isCurrentYear) return frozen;
+      const live = await getEntry<Record<number, number>>(liveKey);
+      if (live && Date.now() - live.updatedAt < PLAYER_BE_TTL) {
+        return { ...frozen, ...live.value };
+      }
     }
   } catch { /* ignore */ }
 
@@ -1000,8 +1023,25 @@ async function fetchPlayerRoundBEs(
     result[roundData[lastScoredIdx].round + 1] = currentBE;
   }
 
+  // Split the merged result into a frozen half (everything except the live
+  // currentBE row) and a live half (just that one row, current year only).
+  // Past seasons skip the live write entirely — every entry is frozen.
+  const liveRound = lastScoredIdx >= 0 ? roundData[lastScoredIdx].round + 1 : -1;
+  const frozenPart: Record<number, number> = {};
+  const livePart:   Record<number, number> = {};
+  for (const [k, be] of Object.entries(result)) {
+    const round = parseInt(k, 10);
+    if (isCurrentYear && round === liveRound) livePart[round] = be;
+    else frozenPart[round] = be;
+  }
+
   try {
-    await setJson(cacheKey, result);
+    if (Object.keys(frozenPart).length > 0) {
+      await setJson(frozenKey, frozenPart, { permanent: true });
+    }
+    if (isCurrentYear && Object.keys(livePart).length > 0) {
+      await setJson(liveKey, livePart);
+    }
   } catch { /* ignore */ }
 
   return result;

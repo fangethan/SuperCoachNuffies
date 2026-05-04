@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player } from '../types';
 import { getJson, setJson } from '../store/cache';
+import { useAppStore } from '../store/useAppStore';
+import { CURRENT_YEAR } from '../constants';
 
 // Per-(year, round) cache entry. Keying by year+round means flipping between
 // rounds via the round picker doesn't blow away the previous round's cache.
@@ -23,6 +25,11 @@ export function useRoundScores(
   const playersRef = useRef(players);
   playersRef.current = players;
 
+  // Live round from the store — anything strictly below this is a completed
+  // round and its scores are immutable. Reading once at hook-call time is
+  // enough; we only re-read on the freshly-fetched scores write below.
+  const maxRound = useAppStore(s => s.maxRound);
+
   const query = useQuery<Record<number, PlayerRoundScores>>({
     queryKey: ['round-scores', 'v5', year, targetRound],
     queryFn: async () => {
@@ -39,8 +46,19 @@ export function useRoundScores(
         playersRef.current,
       );
 
+      // Past rounds (prior season, or earlier round in the current season)
+      // are frozen — Footywire will never publish a different score for
+      // round 3 of 2025 again. Mark those rows permanent so cold start can
+      // skip the network. The live round stays on the existing TTL so
+      // weekend score updates flow in.
+      const isFrozen = year < CURRENT_YEAR || targetRound < maxRound;
+
       try {
-        await setJson<StoredScores>(RS_KEY(year, targetRound), { scores });
+        await setJson<StoredScores>(
+          RS_KEY(year, targetRound),
+          { scores },
+          { permanent: isFrozen },
+        );
       } catch { /* ignore */ }
 
       return scores;

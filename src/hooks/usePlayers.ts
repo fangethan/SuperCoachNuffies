@@ -379,9 +379,14 @@ export function useMatchupStats(player: Player | undefined, nextMatch: MatchEntr
         venueAvg: calcAvg(venueScores),
       };
 
-      // 3. Persist to SQLite for instant cold-start next time
+      // 3. Persist to SQLite for instant cold-start next time. The aggregate
+      //    is built entirely from HISTORICAL_YEARS data (prior seasons), so
+      //    within a given CURRENT_YEAR the result is frozen — mark the row
+      //    permanent. When the season rolls over, CURRENT_YEAR changes and
+      //    the cache key changes with it, so the new key fetches fresh and
+      //    the old key (now stale) ages out via deleteByPrefix on cleanup.
       try {
-        await setJson(cacheKey, result);
+        await setJson(cacheKey, result, { permanent: true });
       } catch { /* ignore */ }
 
       return result;
