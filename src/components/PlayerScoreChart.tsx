@@ -63,23 +63,22 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
     });
   }, [allRounds, perRoundScores]);
 
-  // BE per round: from fetched price data for played rounds, stagnant for non-played.
-  // Returns null for rounds before the first known BE (avoids misleading stagnant 0s).
+  // BE per round: trust the price-derived map from fetchPlayerRoundBEs.
+  // Returns null for any round we don't have a real BE for, so the dot
+  // simply isn't rendered rather than showing a misleading guess.
   const bePerRound = useMemo(() => {
     const playedOnly = allRounds.filter(r => perRoundScores[r] > 0);
     const lastPlayedRound = playedOnly.length > 0 ? playedOnly[playedOnly.length - 1] : -1;
+
+    // Build the lookup directly from perRoundBE — no heuristic fallback.
+    // Any played round without a derived BE stays absent; the walk-forward
+    // logic below leaves it null. Earlier code fell back to `ppts` here,
+    // which caused two same-priced players to render different "R1" BEs
+    // because each player's upcoming-round currentBE differs.
     const beByRound = new Map<number, number>();
-    playedOnly.forEach((r, idx) => {
-      // Prefer fetched price-derived BE; fall back to 3-game window only when ppts is known
+    playedOnly.forEach((r) => {
       if (perRoundBE?.[r] !== undefined) {
         beByRound.set(r, perRoundBE[r]);
-      } else if (ppts !== 0) {
-        const be = idx >= 3
-          ? perRoundScores[playedOnly[idx - 3]]
-          : idx > 0
-            ? Math.round(playedOnly.slice(0, idx).reduce((s, pr) => s + perRoundScores[pr], 0) / 3)
-            : ppts;
-        beByRound.set(r, be);
       }
     });
 

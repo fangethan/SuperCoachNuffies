@@ -44,8 +44,8 @@ import { CURRENT_YEAR, SC_DOLLARS_PER_POINT, SC_STARTING_BE_DIVISOR } from '../c
 // Splitting like this means a stale live row triggers exactly one refetch
 // path (live), and the frozen half is reused without going to the network.
 // For a closed season (year != CURRENT_YEAR) we never write a live row.
-const PLAYER_BE_KEY_PREFIX_FROZEN = 'be7p:';
-const PLAYER_BE_KEY_PREFIX_LIVE   = 'be7:';
+const PLAYER_BE_KEY_PREFIX_FROZEN = 'be8p:';
+const PLAYER_BE_KEY_PREFIX_LIVE   = 'be8:';
 const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours, applies only to the live half
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -354,7 +354,11 @@ function parsePlayerAllYearsPage(html: string, latestYear: number): Record<numbe
     // Allow round 0 (AFL Opening Round) — it counts toward avgs
     if (isNaN(round) || round < 0 || round > 30) continue;
     const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
-    if (isNaN(price) || price < 100_000) continue;
+    // Floor: SC's minimum player price is $99,100. The threshold must sit
+    // below that or we silently drop every rookie's bubble rounds (R1/R2
+    // at $99.1k), which slides the firstScoredIdx forward and produces a
+    // wrong starting BE. 50,000 still rejects garbage rows.
+    if (isNaN(price) || price < 50_000) continue;
 
     // Round went backward (or stayed at 0 → 0) → new season section has started.
     // prevRound >= 0 so the initial sentinel value of -1 doesn't trigger a false decrement.
@@ -385,7 +389,11 @@ function parsePlayerRoundPage(html: string): Map<number, number> {
     const round = parseInt(cells[0], 10);
     if (isNaN(round) || round < 1 || round > 30) continue;
     const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
-    if (isNaN(price) || price < 100_000) continue;
+    // Floor: SC's minimum player price is $99,100. The threshold must sit
+    // below that or we silently drop every rookie's bubble rounds (R1/R2
+    // at $99.1k), which slides the firstScoredIdx forward and produces a
+    // wrong starting BE. 50,000 still rejects garbage rows.
+    if (isNaN(price) || price < 50_000) continue;
     if (round === 1) {
       if (seenRound1) break;
       seenRound1 = true;
@@ -734,7 +742,11 @@ function parseRoundScoresPage(html: string): Record<string, number> {
     if (!name || name.length < 3) continue;
     // Validate cells[3] is the current price (>100k) — guards against header/ad rows
     const price = parseInt((cells[3] ?? '').replace(/[$,\s]/g, ''), 10);
-    if (isNaN(price) || price < 100_000) continue;
+    // Floor: SC's minimum player price is $99,100. The threshold must sit
+    // below that or we silently drop every rookie's bubble rounds (R1/R2
+    // at $99.1k), which slides the firstScoredIdx forward and produces a
+    // wrong starting BE. 50,000 still rejects garbage rows.
+    if (isNaN(price) || price < 50_000) continue;
     // Round score is in cells[5]
     const scoreRaw = (cells[5] ?? '').trim();
     if (!/^\d+$/.test(scoreRaw)) continue;
@@ -939,7 +951,11 @@ async function fetchPlayerRoundBEs(
     const round = parseInt(cells[0], 10);
     if (isNaN(round) || round < 0 || round > 30) continue;
     const price = parseInt((cells[1] ?? '').replace(/[$,\s]/g, ''), 10);
-    if (isNaN(price) || price < 100_000) continue;
+    // Floor: SC's minimum player price is $99,100. The threshold must sit
+    // below that or we silently drop every rookie's bubble rounds (R1/R2
+    // at $99.1k), which slides the firstScoredIdx forward and produces a
+    // wrong starting BE. 50,000 still rejects garbage rows.
+    if (isNaN(price) || price < 50_000) continue;
 
     if (prevRound >= 0 && round <= prevRound) {
       curYear--;
