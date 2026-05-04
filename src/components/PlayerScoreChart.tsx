@@ -50,8 +50,11 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
   const n = allRounds.length;
 
   // Use measured container width; fall back to 0 until first layout pass.
-  const chartWidth  = containerW > 0 ? containerW : 0;
-  const available   = chartWidth - Y_AXIS_W - INIT_SPACE;
+  const chartWidth = containerW > 0 ? containerW : 0;
+  // gifted-charts treats `width` prop as the bar canvas — total
+  // component width = width + yAxisLabelWidth — so the canvas
+  // available for bars + spacings is `chartWidth - Y_AXIS_W`.
+  const barCanvas  = Math.max(0, chartWidth - Y_AXIS_W);
 
   // Spacing scales with round count so dense charts (24 rounds) don't
   // hand most of their width to gaps. INTRA = gap between the two bars
@@ -59,17 +62,23 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
   // width cap is raised in lockstep so short histories also benefit
   // (an 8-round chart now gets chunky 14px bars instead of being
   // capped at 8 with lots of dead space).
-  //
-  // Tuning notes for n=24 on iPhone 13 (390pt screen, ~314px chart
-  // canvas after padding + Y axis): INTRA=0 INTER=1 lands barW at 6,
-  // which is the sweet spot before bar-pairs start visually merging
-  // with their neighbours.
   const INTRA = n > 16 ? 0 : 1;
   const INTER = n > 16 ? 1 : 4;
   const BAR_CAP = n > 16 ? 12 : 14;
 
-  const barW        = Math.max(3, Math.min(BAR_CAP,
-    Math.floor((available - (INTRA + INTER) * n) / (n * 2)),
+  // Bar width is computed as a FLOAT — gifted-charts renders sub-pixel
+  // bar widths cleanly, and floor()ing means any leftover canvas gets
+  // dumped as slack on the right. A phone with Display Zoom enabled
+  // (375pt instead of 390pt logical width) ends up with ~40px of
+  // unused trailing space when the float result rounds down. With a
+  // float barW the bars expand to fill the canvas exactly on every
+  // device, regardless of screen width.
+  //
+  // Inter-group gap count is (n-1), not n: only the GAPS between
+  // groups consume INTER, the last group has no trailing INTER.
+  const barW = Math.max(3, Math.min(
+    BAR_CAP,
+    (barCanvas - INIT_SPACE - INTRA * n - INTER * (n - 1)) / (n * 2),
   ));
   const groupStride = 2 * barW + INTRA + INTER;
 
