@@ -23,7 +23,7 @@ const SORT_OPTIONS: { label: string; value: SortOption }[] = [
   { label: 'Avg', value: 'avg' },
   { label: '3 Rd Avg', value: 'avg3' },
   { label: '5 Rd Avg', value: 'avg5' },
-  { label: 'Score', value: 'points' },   // label overridden in render with dynamic round
+  { label: 'Round Pts', value: 'points' },
   { label: 'Price', value: 'price' },
   { label: '±$ Change', value: 'price_change' },
   { label: 'Breakeven', value: 'ppts' },
@@ -178,20 +178,16 @@ export default function PlayersScreen() {
           keyboardShouldPersistTaps="handled"
         >
           {SORT_OPTIONS.map(opt => {
-            const isPoints = opt.value === 'points';
             const active = sortBy === opt.value;
             return (
               <TouchableOpacity
                 key={opt.value}
                 activeOpacity={0.8}
                 style={[styles.sortPill, active && styles.sortActive]}
-                onPress={() => {
-                  setSortBy(opt.value);
-                  if (isPoints) setRoundModalOpen(true);
-                }}
+                onPress={() => setSortBy(opt.value)}
               >
                 <Text style={[styles.sortLabel, active && styles.sortLabelActive]}>
-                  {isPoints ? `Rnd ${scoreRound} Pts ▾` : opt.label}
+                  {opt.label}
                 </Text>
               </TouchableOpacity>
             );
@@ -226,6 +222,20 @@ export default function PlayersScreen() {
             {`Filters${hasActiveFilters ? ' •' : ''}`}
           </Text>
         </TouchableOpacity>
+        {/* Round picker pill — only when Round Pts sort is active.
+            Sits next to Filters so the round-picker doesn't clutter
+            the sort scroll. Tapping opens the round-picker modal. */}
+        {sortBy === 'points' && (
+          <TouchableOpacity
+            activeOpacity={0.8}
+            style={[styles.chip, styles.chipActive]}
+            onPress={() => setRoundModalOpen(true)}
+          >
+            <Text style={[styles.chipLabel, styles.chipLabelActive]}>
+              Rnd {scoreRound} ▾
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Advanced filter bottom sheet */}

@@ -1,6 +1,7 @@
 import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
-import { useLocalSearchParams, Stack } from 'expo-router';
+import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats, usePlayerRoundData } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
@@ -136,12 +137,12 @@ export default function PlayerDetailScreen() {
     if (isHistorical) {
       return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-          <Stack.Screen options={{
-            title: '',
-            headerRight: () => (
-              <YearPickerButton year={selectedYear} onPress={() => setYearModalOpen(true)} />
-            ),
-          }} />
+          <Stack.Screen options={{ headerShown: false }} />
+          <CustomHeader
+            title=""
+            year={selectedYear}
+            onYearPress={() => setYearModalOpen(true)}
+          />
           <View style={styles.notInSeason}>
             <Text style={styles.notInSeasonText}>
               Player was not part of the AFL in the {selectedYear} season
@@ -219,19 +220,19 @@ export default function PlayerDetailScreen() {
   const basePrice = stats.price ?? 0;
 
   if (ppts !== 0 && basePrice > 0) {
-    // Last two played scores — seed for the 3-game BE rolling window
-    const s_n2 = sortedPlayedRounds.length >= 2
-      ? perRoundScores[sortedPlayedRounds[sortedPlayedRounds.length - 2]]
-      : avg;
-    const s_n1 = sortedPlayedRounds.length >= 1
-      ? perRoundScores[sortedPlayedRounds[sortedPlayedRounds.length - 1]]
-      : avg;
-
-    // The next round's BE projection is now the rolling 3-game average
-    // (see comment further down at the chainBE update). The previous
-    // attempt to derive it via `9P/M − s_n-2 − s_n-1` was based on a
-    // model SC doesn't actually use and produced runaway BE values
-    // (1000+) for premium players, breaking the price projection.
+    // BE projection — exponential smoothing toward projScore. Round 1
+    // of the projection uses Footywire's published currentBE directly
+    // (most accurate for the upcoming round), then for each subsequent
+    // round we drift chainBE toward projScore at α = 1/3 per round.
+    // This mimics SC's real 3-game rolling-average behaviour: after a
+    // few rounds at projScore, BE settles near projScore and the round-
+    // over-round price change converges to ~0 (price stabilises).
+    //
+    // Why not a fixed-K formula (Scobey style)? It's accurate for the
+    // first 3 rounds but holds the BE constant forever, so any negative
+    // gap between projScore and BE compounds linearly across the rest
+    // of the season. Heeney's projection ran his price from $678k to
+    // $399k that way — unrealistic. Smoothing fixes that.
     //
     // Footywire uses season avg (not rolling avg) as the forward projection seed
     const gamesCount = stats.games > 0 ? stats.games : sortedPlayedRounds.length;
@@ -242,9 +243,8 @@ export default function PlayerDetailScreen() {
     let chainPrice = basePrice;
     let prevChainPrice = basePrice;
     let chainBE = ppts;
-    let be_s_n2 = s_n2;
-    let be_s_n1 = s_n1;
     let gamesPlayed = gamesCount;
+    const BE_SMOOTH_ALPHA = 1 / 3;
 
     for (const m of fixtures) {
       const seasonAvg = seasonGames > 0 ? seasonTotal / seasonGames : avg;
@@ -275,23 +275,13 @@ export default function PlayerDetailScreen() {
       seasonGames += 1;
       gamesPlayed += 1;
 
-      // Shift the BE window. The previous formula here used
-      //   chainBE = (9/SC_MAGIC) × newChainPrice − s[n-2] − s[n-1]
-      // which is mathematically derived from the model
-      //   price = SC_MAGIC × rolling3avg / 9
-      // but we've empirically shown SC pricing doesn't follow that —
-      // only `priceChange = (score - BE) × M/9` is reliable. For a
-      // premium player at $650k the recursion blew chainBE up to ~1200,
-      // making each "projected" round drop the price by hundreds of
-      // thousands of dollars (the user-reported -$479k bug).
-      //
-      // Use the rolling-3 score average as the next round's BE
-      // instead. Intuition: a player who keeps scoring at their
-      // current rate breaks even — change ≈ 0. Trending up → price
-      // rises; trending down → price falls. Stable, no runaway.
-      be_s_n2 = be_s_n1;
-      be_s_n1 = projScore;
-      chainBE = (be_s_n2 + be_s_n1 + projScore) / 3;
+      // Drift chainBE toward projScore via exponential smoothing.
+      // After ~3 rounds of consistent projScore, chainBE will be close
+      // to projScore (so subsequent priceChanges trend toward 0 and the
+      // price stabilises). This is the long-horizon-correct behaviour;
+      // a fixed BE would compound deficits and run the price into the
+      // ground over a full season's projection.
+      chainBE = BE_SMOOTH_ALPHA * projScore + (1 - BE_SMOOTH_ALPHA) * chainBE;
 
       prevChainPrice = chainPrice;
       chainPrice = newChainPrice;
@@ -301,12 +291,17 @@ export default function PlayerDetailScreen() {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Stack.Screen options={{
-        title: `${player.first_name} ${player.last_name}`,
-        headerRight: () => (
-          <YearPickerButton year={selectedYear} onPress={() => setYearModalOpen(true)} />
-        ),
-      }} />
+      {/* iOS 26's Stack header auto-applies a Liquid Glass pill behind
+          any tappable headerRight, which we couldn't suppress. Hide
+          the system header entirely and render our own at the top of
+          the scroll content — Back button on the left, year picker
+          (plain text, no pill) on the right. */}
+      <Stack.Screen options={{ headerShown: false }} />
+      <CustomHeader
+        title={`${player.first_name} ${player.last_name}`}
+        year={selectedYear}
+        onYearPress={() => setYearModalOpen(true)}
+      />
       {/* Header */}
       <View style={styles.header}>
         <TeamBadge teamName={player.team?.name ?? ''} size={46} />
@@ -715,14 +710,41 @@ export default function PlayerDetailScreen() {
 }
 
 /**
- * Compact year-picker control rendered in the screen header — plain text,
- * no surrounding pill (matches the unstyled look of other header elements).
+ * Custom navigation header — replaces expo-router's stack header so iOS
+ * 26's Liquid Glass treatment doesn't auto-apply a translucent pill
+ * behind the year picker. Mounted at the top of the player profile's
+ * ScrollView; provides a back button on the left, the player's name in
+ * the centre, and the year picker on the right.
  */
-function YearPickerButton({ year, onPress }: { year: number; onPress: () => void }) {
+function CustomHeader({ title, year, onYearPress }: {
+  title: string;
+  year: number;
+  onYearPress: () => void;
+}) {
+  const router = useRouter();
   return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress} style={styles.yearPickerBtn}>
-      <Text style={styles.yearPickerText}>{year} ▾</Text>
-    </TouchableOpacity>
+    <SafeAreaView edges={['top']} style={styles.customHeaderSafe}>
+      <View style={styles.customHeaderRow}>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => router.back()}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.customHeaderBackBtn}
+        >
+          <Text style={styles.customHeaderBackChev}>‹</Text>
+          <Text style={styles.customHeaderBackText}>Back</Text>
+        </TouchableOpacity>
+        <Text style={styles.customHeaderTitle} numberOfLines={1}>{title}</Text>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={onYearPress}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          style={styles.customHeaderYearBtn}
+        >
+          <Text style={styles.customHeaderYearText}>{year} ▾</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 }
 
@@ -941,6 +963,54 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   yearPickerText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    letterSpacing: 0.3,
+  },
+
+  // Custom navigation header — replaces the system Stack header so we
+  // bypass iOS 26's Liquid Glass treatment on tappable header items.
+  customHeaderSafe: {
+    backgroundColor: COLORS.background,
+  },
+  customHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 44,
+  },
+  customHeaderBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  customHeaderBackChev: {
+    fontSize: 28,
+    fontWeight: '300',
+    color: COLORS.textPrimary,
+    marginRight: 2,
+    marginTop: -2,
+  },
+  customHeaderBackText: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: COLORS.textPrimary,
+  },
+  customHeaderTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    textAlign: 'center',
+  },
+  customHeaderYearBtn: {
+    minWidth: 80,
+    alignItems: 'flex-end',
+    paddingHorizontal: 4,
+  },
+  customHeaderYearText: {
     fontSize: 15,
     fontWeight: '700',
     color: COLORS.textPrimary,
