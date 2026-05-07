@@ -102,15 +102,25 @@ export function useFilteredPlayers(
 
 /**
  * Raw per-round price/score history for a player+year, as parsed from
- * Footywire's profile page. Used by the History table to display the
- * per-week price column. Cached permanently for past seasons (immutable)
- * and on a 6h TTL for the current year.
+ * Footywire's profile page. Used by the History table for the per-week
+ * Price column.
+ *
+ * Cache strategy: permanent for past seasons. For the current season,
+ * also permanent — but invalidated when a new round is played
+ * (maxRound advances). The cache key carries the expected last-played
+ * round so RQ + the SQLite cache both refresh in lockstep with the
+ * round progression. Within a single round window, cache hits are
+ * instant — no Footywire fetch happens after the first visit.
  */
 export function usePlayerRoundData(player: Player | undefined, year: number) {
+  const maxRound = useAppStore(s => s.maxRound);
+  const expectedLastPlayedRound = year < CURRENT_YEAR
+    ? 24                              // historical seasons: end-of-regular
+    : Math.max(0, maxRound - 1);      // current year: last completed
   return useQuery({
-    queryKey: ['player-round-data', 'v1', player?.id, year],
+    queryKey: ['player-round-data', 'v2', player?.id, year, expectedLastPlayedRound],
     queryFn: () => footywireApi.fetchPlayerRoundData(
-      player!.first_name, player!.last_name, player!.team.name, year,
+      player!.first_name, player!.last_name, player!.team.name, year, expectedLastPlayedRound,
     ),
     enabled: !!player,
     staleTime: 1000 * 60 * 60 * 24,
@@ -128,10 +138,14 @@ export function usePlayerRoundData(player: Player | undefined, year: number) {
  * no rows for that year, which the profile screen should render as N/A.
  */
 export function usePlayerHistoricalStats(player: Player | undefined, year: number) {
+  const maxRound = useAppStore(s => s.maxRound);
+  const expectedLastPlayedRound = year < CURRENT_YEAR
+    ? 24
+    : Math.max(0, maxRound - 1);
   return useQuery({
-    queryKey: ['player-season-summary', 'v1', player?.id, year],
+    queryKey: ['player-season-summary', 'v2', player?.id, year, expectedLastPlayedRound],
     queryFn: () => footywireApi.fetchPlayerSeasonSummary(
-      player!.first_name, player!.last_name, player!.team.name, year,
+      player!.first_name, player!.last_name, player!.team.name, year, expectedLastPlayedRound,
     ),
     enabled: !!player,
     staleTime: 1000 * 60 * 60 * 24,

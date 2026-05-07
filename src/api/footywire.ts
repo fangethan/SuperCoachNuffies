@@ -1006,6 +1006,15 @@ async function fetchPlayerRoundData(
   lastName: string,
   teamName: string,
   year: number,
+  /**
+   * The most recent round we expect to see in the data. The cache hit
+   * path requires the cached array to cover at least up to this round
+   * — if a new round has been played since we cached, we refetch.
+   * Past seasons can pass the constant end-of-season round (24); the
+   * current season passes maxRound − 1 (last completed) so a new
+   * round automatically forces a refresh.
+   */
+  expectedLastPlayedRound?: number,
 ): Promise<RoundDataRow[]> {
   const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
   if (!slug) return [];
@@ -1016,11 +1025,26 @@ async function fetchPlayerRoundData(
   try {
     const cached = await getEntry<RoundDataRow[]>(cacheKey);
     if (cached && cached.value.length > 0) {
-      // Only honour the cache if it has actual data — never trust an
-      // empty cached array as ground truth (that's how players got
-      // stuck). On empty cache we always re-fetch.
-      if (!isCurrentYear) return cached.value;       // permanent
-      if (Date.now() - cached.updatedAt < PRD_TTL) return cached.value;
+      // Past years are immutable — always serve cache.
+      if (!isCurrentYear) return cached.value;
+
+      // Current year: serve cache as long as it covers up to the
+      // expected last-played round. Once a new round is played
+      // (maxRound advances → expectedLastPlayedRound increases) the
+      // cache becomes stale and we refetch. Completed rounds within
+      // the cache are effectively permanent — they never need to be
+      // re-fetched on their own, only when a *newer* round arrives.
+      const cachedLastPlayed = Math.max(
+        -1,
+        ...cached.value.filter(r => r.score !== null).map(r => r.round),
+      );
+      if (
+        expectedLastPlayedRound === undefined ||
+        cachedLastPlayed >= expectedLastPlayedRound
+      ) {
+        return cached.value;
+      }
+      // else fall through to refetch — a new round has been played
     }
   } catch { /* ignore */ }
 
@@ -1031,7 +1055,9 @@ async function fetchPlayerRoundData(
   // want the next visit to retry rather than serve a stuck empty.
   if (roundData.length > 0) {
     try {
-      await setJson(cacheKey, roundData, { permanent: !isCurrentYear });
+      // Always permanent — the round-progression check above is what
+      // invalidates stale rows now, not a TTL.
+      await setJson(cacheKey, roundData, { permanent: true });
     } catch { /* ignore */ }
   }
 
@@ -1043,6 +1069,7 @@ async function fetchPlayerSeasonSummary(
   lastName: string,
   teamName: string,
   year: number,
+  expectedLastPlayedRound?: number,
 ): Promise<PlayerSeasonSummary> {
   const slug = buildPlayerSlug(teamName, `${firstName} ${lastName}`);
   if (!slug) return emptySeasonSummary();
@@ -1052,14 +1079,19 @@ async function fetchPlayerSeasonSummary(
 
   try {
     const cached = await getEntry<PlayerSeasonSummary>(cacheKey);
-    // Only honour the cache when it represents a played season —
-    // empty (games=0) summaries from a transient failure shouldn't
-    // stick. The "didn't play this year" case still works on next
-    // visit because the parser will return [] again and the renderer
-    // shows the not-in-season banner.
     if (cached && cached.value.games > 0) {
-      if (!isCurrentYear) return cached.value;     // permanent
-      if (Date.now() - cached.updatedAt < PSH_TTL) return cached.value;
+      if (!isCurrentYear) return cached.value;     // past seasons immutable
+
+      // Current year: serve cache while it still covers the latest
+      // played round. Once a new round happens, lastRound is behind
+      // and we refetch — same round-progression logic as
+      // fetchPlayerRoundData.
+      if (
+        expectedLastPlayedRound === undefined ||
+        cached.value.lastRound >= expectedLastPlayedRound
+      ) {
+        return cached.value;
+      }
     }
   } catch { /* ignore */ }
 
@@ -1068,7 +1100,7 @@ async function fetchPlayerSeasonSummary(
 
   if (summary.games > 0) {
     try {
-      await setJson(cacheKey, summary, { permanent: !isCurrentYear });
+      await setJson(cacheKey, summary, { permanent: true });
     } catch { /* ignore */ }
   }
 
