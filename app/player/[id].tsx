@@ -5,7 +5,7 @@ import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatc
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
-import { COLORS, POSITIONS, CURRENT_YEAR, SC_DOLLARS_PER_POINT, SC_MAGIC } from '../../src/constants';
+import { COLORS, POSITIONS, CURRENT_YEAR, SC_DOLLARS_PER_POINT } from '../../src/constants';
 import { footywireApi, MatchEntry } from '../../src/api/footywire';
 import { TeamBadge } from '../../src/components/TeamBadge';
 import { PlayerScoreChart } from '../../src/components/PlayerScoreChart';
@@ -33,6 +33,13 @@ export default function PlayerDetailScreen() {
   const { data: matchList } = useMatchList(selectedYear);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
   const [yearModalOpen, setYearModalOpen] = useState(false);
+
+  // Reset to History whenever the user changes year. Otherwise switching
+  // 2026 → 2025 leaves the user on Fixtures (a tab that's hidden in
+  // historical mode anyway, since past seasons have no upcoming games).
+  React.useEffect(() => {
+    setActiveTab('history');
+  }, [selectedYear]);
 
   const player = players?.find(p => String(p.id) === id);
   const stats = player?.player_stats?.[0];
@@ -81,19 +88,32 @@ export default function PlayerDetailScreen() {
   // weekly $ column. Same data source as histSummary; the hook caches
   // separately so swapping years doesn't double-fetch the page.
   const { data: roundData } = usePlayerRoundData(player, selectedYear);
-  // Map round → { price, weeklyDelta } so the row renderer can look up
-  // each round in O(1). Delta is current-row.price − previous-row.price
-  // (the change applied DURING this round). First round has no prior,
-  // so delta is 0 (chart shows '-' there).
+  // Map round → { price, delta } for the History table's Price column.
+  //
+  // Footywire convention: row[R].price is the ENTRY price for round R
+  // (= exit of round R-1). To show a player's price AFTER round R was
+  // played, we use the NEXT row's entry price (= exit of R = entry of
+  // R+1). For the most recent played round the next-row may not exist
+  // in the profile page yet, so fall back to the listing-page current
+  // price (`stats.price`), which IS the entry-of-upcoming-round.
+  //
+  // Delta for round R = (price after R) − (price before R) = the $
+  // change actually applied during round R. The previous version
+  // computed `row[i].price − row[i-1].price`, which is the change
+  // during R-1 — that's what made R8 show "+$4.1k" while the player's
+  // current price had actually fallen $12.9k since R7.
   const priceByRound = React.useMemo(() => {
     const m = new Map<number, { price: number; delta: number }>();
     if (!roundData) return m;
+    const fallbackExit = stats?.price ?? 0;
     roundData.forEach((row, i) => {
-      const prev = i > 0 ? roundData[i - 1].price : row.price;
-      m.set(row.round, { price: row.price, delta: row.price - prev });
+      const exit = i + 1 < roundData.length
+        ? roundData[i + 1].price
+        : fallbackExit;
+      m.set(row.round, { price: exit, delta: exit - row.price });
     });
     return m;
-  }, [roundData]);
+  }, [roundData, stats?.price]);
   const histPlayed = isHistorical && (histSummary?.games ?? 0) > 0;
   // True when we're in historical mode and have decisively confirmed
   // the player did not play that year — suppresses every stat below.
@@ -207,14 +227,12 @@ export default function PlayerDetailScreen() {
       ? perRoundScores[sortedPlayedRounds[sortedPlayedRounds.length - 1]]
       : avg;
 
-    // BE_n = baseRatio × price_n − s[n-2] − s[n-1]
-    // baseRatio is a season-wide constant from the SC formula:
-    //   BE = (9 × price / SC_MAGIC) − s[n-2] − s[n-1]
-    // i.e. baseRatio = 9 / SC_MAGIC. Previously this was back-fitted per-player
-    // from one data point (ppts + s_n2 + s_n1) / basePrice, which only matched
-    // SC's actual ratio by luck for premium-priced players.
-    const baseRatio = 9 / SC_MAGIC;
-
+    // The next round's BE projection is now the rolling 3-game average
+    // (see comment further down at the chainBE update). The previous
+    // attempt to derive it via `9P/M − s_n-2 − s_n-1` was based on a
+    // model SC doesn't actually use and produced runaway BE values
+    // (1000+) for premium players, breaking the price projection.
+    //
     // Footywire uses season avg (not rolling avg) as the forward projection seed
     const gamesCount = stats.games > 0 ? stats.games : sortedPlayedRounds.length;
     const pointsCount = stats.total_points > 0 ? stats.total_points : avg * gamesCount;
@@ -257,10 +275,23 @@ export default function PlayerDetailScreen() {
       seasonGames += 1;
       gamesPlayed += 1;
 
-      // Shift the BE window and compute next round's BE using the fixed ratio
+      // Shift the BE window. The previous formula here used
+      //   chainBE = (9/SC_MAGIC) × newChainPrice − s[n-2] − s[n-1]
+      // which is mathematically derived from the model
+      //   price = SC_MAGIC × rolling3avg / 9
+      // but we've empirically shown SC pricing doesn't follow that —
+      // only `priceChange = (score - BE) × M/9` is reliable. For a
+      // premium player at $650k the recursion blew chainBE up to ~1200,
+      // making each "projected" round drop the price by hundreds of
+      // thousands of dollars (the user-reported -$479k bug).
+      //
+      // Use the rolling-3 score average as the next round's BE
+      // instead. Intuition: a player who keeps scoring at their
+      // current rate breaks even — change ≈ 0. Trending up → price
+      // rises; trending down → price falls. Stable, no runaway.
       be_s_n2 = be_s_n1;
       be_s_n1 = projScore;
-      chainBE = baseRatio * newChainPrice - be_s_n2 - be_s_n1;
+      chainBE = (be_s_n2 + be_s_n1 + projScore) / 3;
 
       prevChainPrice = chainPrice;
       chainPrice = newChainPrice;
