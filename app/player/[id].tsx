@@ -2,6 +2,7 @@ import React, { Fragment, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, Pressable } from 'react-native';
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats, usePlayerRoundData } from '../../src/hooks/usePlayers';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
@@ -136,25 +137,27 @@ export default function PlayerDetailScreen() {
     // why their stats are blank rather than a generic "not found".
     if (isHistorical) {
       return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        <View style={styles.container}>
           <Stack.Screen options={{ headerShown: false }} />
           <CustomHeader
             title=""
             year={selectedYear}
             onYearPress={() => setYearModalOpen(true)}
           />
-          <View style={styles.notInSeason}>
-            <Text style={styles.notInSeasonText}>
-              Player was not part of the AFL in the {selectedYear} season
-            </Text>
-          </View>
+          <ScrollView contentContainerStyle={styles.content}>
+            <View style={styles.notInSeason}>
+              <Text style={styles.notInSeasonText}>
+                Player was not part of the AFL in the {selectedYear} season
+              </Text>
+            </View>
+          </ScrollView>
           <YearPickerModal
             open={yearModalOpen}
             onClose={() => setYearModalOpen(false)}
             selectedYear={selectedYear}
             onSelect={(y) => { setSelectedYear(y); setYearModalOpen(false); }}
           />
-        </ScrollView>
+        </View>
       );
     }
     return (
@@ -290,18 +293,18 @@ export default function PlayerDetailScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* iOS 26's Stack header auto-applies a Liquid Glass pill behind
-          any tappable headerRight, which we couldn't suppress. Hide
-          the system header entirely and render our own at the top of
-          the scroll content — Back button on the left, year picker
-          (plain text, no pill) on the right. */}
+    <View style={styles.container}>
+      {/* CustomHeader sits OUTSIDE the ScrollView so it stays locked
+          at the top while the page content scrolls underneath.
+          headerShown:false on the Stack means iOS 26's auto-applied
+          Liquid Glass pill on the year picker is also gone. */}
       <Stack.Screen options={{ headerShown: false }} />
       <CustomHeader
         title={`${player.first_name} ${player.last_name}`}
         year={selectedYear}
         onYearPress={() => setYearModalOpen(true)}
       />
+      <ScrollView contentContainerStyle={styles.content}>
       {/* Header */}
       <View style={styles.header}>
         <TeamBadge teamName={player.team?.name ?? ''} size={46} />
@@ -705,7 +708,8 @@ export default function PlayerDetailScreen() {
         selectedYear={selectedYear}
         onSelect={(y) => { setSelectedYear(y); setYearModalOpen(false); }}
       />
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -725,14 +729,21 @@ function CustomHeader({ title, year, onYearPress }: {
   return (
     <SafeAreaView edges={['top']} style={styles.customHeaderSafe}>
       <View style={styles.customHeaderRow}>
+        {/* Real Liquid Glass on the back button via expo-blur. The
+            BlurView renders a native UIVisualEffectView on iOS, giving
+            us the same translucent-blurred pill iOS 26 puts behind
+            system back buttons. The TouchableOpacity wraps it so the
+            full pill is the tap target. overflow:'hidden' clips the
+            blur to the rounded corners. */}
         <TouchableOpacity
           activeOpacity={0.7}
           onPress={() => router.back()}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          style={styles.customHeaderBackBtn}
         >
-          <Text style={styles.customHeaderBackChev}>‹</Text>
-          <Text style={styles.customHeaderBackText}>Back</Text>
+          <BlurView intensity={50} tint="dark" style={styles.customHeaderBackBtn}>
+            <Text style={styles.customHeaderBackChev}>‹</Text>
+            <Text style={styles.customHeaderBackText}>Back</Text>
+          </BlurView>
         </TouchableOpacity>
         <Text style={styles.customHeaderTitle} numberOfLines={1}>{title}</Text>
         <TouchableOpacity
@@ -984,7 +995,15 @@ const styles = StyleSheet.create({
   customHeaderBackBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 80,
+    // Real iOS-26-style Liquid Glass — the BlurView fills this with a
+    // native UIVisualEffectView. overflow:'hidden' clips the blur to
+    // the rounded pill shape. Tint is dark so the pill stays subtle on
+    // our dark background.
+    borderRadius: 22,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    paddingRight: 16,
+    overflow: 'hidden',
   },
   customHeaderBackChev: {
     fontSize: 28,
