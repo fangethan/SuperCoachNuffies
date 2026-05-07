@@ -919,6 +919,13 @@ async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<
     `https://www.footywire.com/afl/footy/${slug}`,
   ).catch(() => '');
 
+  // Diagnostic — surfaces slug + HTML length + final parsed row count.
+  // Empty HTML (length 0) means a 404 on Footywire (slug mismatch);
+  // non-zero HTML with 0 rows points at a parser issue. Helps diagnose
+  // why specific players (e.g. Peter Wright, Davies-Uniacke) sometimes
+  // get an empty BE chart.
+  const htmlLen = html.length;
+
   const roundData: RoundDataRow[] = [];
   // Page leads with the latest (current) season's rows, then prior years
   // below in descending order. We start the running cursor at CURRENT_YEAR
@@ -958,6 +965,15 @@ async function fetchPlayerProfileRoundData(slug: string, year: number): Promise<
   }
 
   roundData.sort((a, b) => a.round - b.round);
+  const scoredCount = roundData.filter(r => r.score !== null).length;
+  console.log(
+    '[ProfilePage]',
+    `slug=${slug}`,
+    `year=${year}`,
+    `htmlLen=${htmlLen}`,
+    `rows=${roundData.length}`,
+    `scored=${scoredCount}`,
+  );
   return roundData;
 }
 
@@ -975,7 +991,14 @@ const PSH_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
 // Same source data as the season summary, exposed as the raw
 // round-by-round rows. Used by the player profile's History table to
 // surface the per-round price + weekly $ change next to each game.
-const PRD_KEY_PREFIX = 'prd:';
+//
+// Bumped "prd:" → "prd2:" because the previous version unconditionally
+// cached EMPTY arrays as permanent on past-year fetches and on 6h TTL
+// for current-year, leaving players (Luke Jackson, Peter Wright,
+// others) stuck with no price/BE data even though their Footywire
+// profile page works fine. New code below also guards against
+// caching empty results so transient failures don't stick.
+const PRD_KEY_PREFIX = 'prd2:';
 const PRD_TTL = 1000 * 60 * 60 * 6;  // 6h, current year only
 
 async function fetchPlayerRoundData(
@@ -992,7 +1015,10 @@ async function fetchPlayerRoundData(
 
   try {
     const cached = await getEntry<RoundDataRow[]>(cacheKey);
-    if (cached) {
+    if (cached && cached.value.length > 0) {
+      // Only honour the cache if it has actual data — never trust an
+      // empty cached array as ground truth (that's how players got
+      // stuck). On empty cache we always re-fetch.
       if (!isCurrentYear) return cached.value;       // permanent
       if (Date.now() - cached.updatedAt < PRD_TTL) return cached.value;
     }
@@ -1000,9 +1026,14 @@ async function fetchPlayerRoundData(
 
   const roundData = await fetchPlayerProfileRoundData(slug, year);
 
-  try {
-    await setJson(cacheKey, roundData, { permanent: !isCurrentYear });
-  } catch { /* ignore */ }
+  // Only cache non-empty results. An empty parse is most likely a
+  // transient failure (network glitch, page format change) and we
+  // want the next visit to retry rather than serve a stuck empty.
+  if (roundData.length > 0) {
+    try {
+      await setJson(cacheKey, roundData, { permanent: !isCurrentYear });
+    } catch { /* ignore */ }
+  }
 
   return roundData;
 }
@@ -1021,7 +1052,12 @@ async function fetchPlayerSeasonSummary(
 
   try {
     const cached = await getEntry<PlayerSeasonSummary>(cacheKey);
-    if (cached) {
+    // Only honour the cache when it represents a played season —
+    // empty (games=0) summaries from a transient failure shouldn't
+    // stick. The "didn't play this year" case still works on next
+    // visit because the parser will return [] again and the renderer
+    // shows the not-in-season banner.
+    if (cached && cached.value.games > 0) {
       if (!isCurrentYear) return cached.value;     // permanent
       if (Date.now() - cached.updatedAt < PSH_TTL) return cached.value;
     }
@@ -1030,9 +1066,11 @@ async function fetchPlayerSeasonSummary(
   const roundData = await fetchPlayerProfileRoundData(slug, year);
   const summary = computeSeasonSummary(roundData);
 
-  try {
-    await setJson(cacheKey, summary, { permanent: !isCurrentYear });
-  } catch { /* ignore */ }
+  if (summary.games > 0) {
+    try {
+      await setJson(cacheKey, summary, { permanent: !isCurrentYear });
+    } catch { /* ignore */ }
+  }
 
   return summary;
 }

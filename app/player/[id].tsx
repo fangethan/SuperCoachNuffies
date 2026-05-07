@@ -3,7 +3,8 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity
 import { useLocalSearchParams, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerRoundBEs, usePlayerHistoricalStats, usePlayerRoundData } from '../../src/hooks/usePlayers';
+import { usePlayers, useByeRounds, useFootywireBreakevens, useMatchList, useMatchupStats, useFixtureProjections, usePlayerHistoricalStats, usePlayerRoundData } from '../../src/hooks/usePlayers';
+import { deriveBEMap } from '../../src/utils/beDerivation';
 import { useRoundScores } from '../../src/hooks/useRoundScores';
 import { useAppStore } from '../../src/store/useAppStore';
 import { formatPrice, formatPriceChange, getPriceDirection } from '../../src/utils/scoring';
@@ -67,7 +68,6 @@ export default function PlayerDetailScreen() {
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
     .sort((a, b) => a.round - b.round)[0] : undefined;
   const { data: matchupStats } = useMatchupStats(player, nextMatch);
-  const { data: roundBEs } = usePlayerRoundBEs(player, selectedYear, pptsEarly);
 
   const allFixtures = !isHistorical ? (matchList
     ?.filter(m => (m.homeTeam === player?.team?.name || m.awayTeam === player?.team?.name) && m.homeScore === null)
@@ -116,6 +116,17 @@ export default function PlayerDetailScreen() {
     });
     return m;
   }, [roundData, stats?.price]);
+
+  // Derive the BE map client-side from roundData instead of refetching
+  // the same Footywire profile page via usePlayerRoundBEs. Both used to
+  // do the same fetch + parse separately, doubling the network round
+  // trip on every profile open. Now there's only one fetch
+  // (usePlayerRoundData) and BE comes for free.
+  const roundBEs = React.useMemo(
+    () => roundData ? deriveBEMap(roundData, pptsEarly) : {},
+    [roundData, pptsEarly],
+  );
+
   const histPlayed = isHistorical && (histSummary?.games ?? 0) > 0;
   // True when we're in historical mode and have decisively confirmed
   // the player did not play that year — suppresses every stat below.
