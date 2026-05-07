@@ -100,16 +100,18 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
     const lastPlayedRound = playedOnly.length > 0 ? playedOnly[playedOnly.length - 1] : -1;
 
     // Build the lookup directly from perRoundBE — no heuristic fallback.
-    // Any played round without a derived BE stays absent; the walk-forward
-    // logic below leaves it null. Earlier code fell back to `ppts` here,
-    // which caused two same-priced players to render different "R1" BEs
-    // because each player's upcoming-round currentBE differs.
+    // Earlier we filtered to playedOnly here, but that hid the upcoming-round
+    // BE (currentBE published by Footywire) and any projected R+1 BE that
+    // deriveBEMap writes — both legitimately live at unplayed rounds. Trust
+    // the derived map: every entry in perRoundBE is a real BE for the round
+    // it's keyed under, so iterate the lot. Walk-forward below still renders
+    // null for any round absent from the map.
     const beByRound = new Map<number, number>();
-    playedOnly.forEach((r) => {
-      if (perRoundBE?.[r] !== undefined) {
-        beByRound.set(r, perRoundBE[r]);
+    if (perRoundBE) {
+      for (const [k, be] of Object.entries(perRoundBE)) {
+        beByRound.set(parseInt(k, 10), be);
       }
-    });
+    }
 
     // Walk forward: carry the last known BE; emit null until the first data point.
     // For rounds AFTER the last played round (upcoming) with no derived BE, show
