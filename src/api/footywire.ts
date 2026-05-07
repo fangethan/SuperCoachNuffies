@@ -52,11 +52,13 @@ import {
 // Splitting like this means a stale live row triggers exactly one refetch
 // path (live), and the frozen half is reused without going to the network.
 // For a closed season (year != CURRENT_YEAR) we never write a live row.
-// Bumped to be9 after the curYear fix in fetchPlayerProfileRoundData.
-// Past-season BE data cached under be8 was derived from mislabelled
-// current-year rows.
-const PLAYER_BE_KEY_PREFIX_FROZEN = 'be9p:';
-const PLAYER_BE_KEY_PREFIX_LIVE   = 'be9:';
+// Bumped to be10 to invalidate stale empty cache rows. Some players
+// (e.g. Max Holmes, Luke Davies-Uniacke) had a `be9p:` row stuck at
+// `{}` from an earlier parser run, so historical BE dots never showed
+// on their charts even though the same player's prd: round-data row
+// was populated correctly.
+const PLAYER_BE_KEY_PREFIX_FROZEN = 'be10p:';
+const PLAYER_BE_KEY_PREFIX_LIVE   = 'be10:';
 const PLAYER_BE_TTL = 1000 * 60 * 60 * 6; // 6 hours, applies only to the live half
 
 // ─── Public types ────────────────────────────────────────────────────────────
