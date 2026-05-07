@@ -105,26 +105,42 @@ export default function PlayerDetailScreen() {
   // during R-1 — that's what made R8 show "+$4.1k" while the player's
   // current price had actually fallen $12.9k since R7.
   const priceByRound = React.useMemo(() => {
-    const m = new Map<number, { price: number; delta: number }>();
+    const m = new Map<number, { price: number; delta: number; projected: boolean }>();
     if (!roundData) return m;
     const fallbackExit = stats?.price ?? 0;
     roundData.forEach((row, i) => {
-      const exit = i + 1 < roundData.length
-        ? roundData[i + 1].price
-        : fallbackExit;
-      m.set(row.round, { price: exit, delta: exit - row.price });
+      let exit: number;
+      let projected = false;
+      if (i + 1 < roundData.length) {
+        exit = roundData[i + 1].price;
+      } else if (
+        row.round === maxRound &&
+        row.score !== null &&
+        pptsEarly > 0
+      ) {
+        // Live-round projection: round just played but Footywire
+        // hasn't published the next row's price yet. Compute exit
+        // via priceChange = (score − BE) × $452.78. Flag as projected
+        // so the UI can label it.
+        exit = row.price + (row.score - pptsEarly) * SC_DOLLARS_PER_POINT;
+        projected = true;
+      } else {
+        exit = fallbackExit;
+      }
+      m.set(row.round, { price: exit, delta: exit - row.price, projected });
     });
     return m;
-  }, [roundData, stats?.price]);
+  }, [roundData, stats?.price, maxRound, pptsEarly]);
 
-  // Derive the BE map client-side from roundData instead of refetching
-  // the same Footywire profile page via usePlayerRoundBEs. Both used to
-  // do the same fetch + parse separately, doubling the network round
-  // trip on every profile open. Now there's only one fetch
-  // (usePlayerRoundData) and BE comes for free.
+  // Derive the BE map client-side from roundData. Pass maxRound so the
+  // published currentBE lands at the correct round — when R9 has just
+  // been played but R9 isn't fully closed, Footywire's currentBE is
+  // still R9's BE, not R10's. The helper also projects R10's BE via
+  // Scobey's formula in that case so the chart isn't blank for the
+  // upcoming round.
   const roundBEs = React.useMemo(
-    () => roundData ? deriveBEMap(roundData, pptsEarly) : {},
-    [roundData, pptsEarly],
+    () => roundData ? deriveBEMap(roundData, pptsEarly, maxRound) : {},
+    [roundData, pptsEarly, maxRound],
   );
 
   const histPlayed = isHistorical && (histSummary?.games ?? 0) > 0;
@@ -278,9 +294,20 @@ export default function PlayerDetailScreen() {
     let seasonTotal = pointsCount;
     let seasonGames = gamesCount;
 
-    let chainPrice = basePrice;
-    let prevChainPrice = basePrice;
-    let chainBE = ppts;
+    // Seed the chain from the live round's projected exit price + the
+    // projected next-round BE if available — otherwise the fixture
+    // tab's R10 numbers contradict the chart's R10 BE dot. Both come
+    // from the same priceByRound / roundBEs Maps that the chart
+    // already uses, so the values stay consistent across the screen.
+    const firstFixtureRound = fixtures[0]?.round;
+    const liveRoundExit = priceByRound.get(maxRound);
+    const startPrice = liveRoundExit ? liveRoundExit.price : basePrice;
+    const startBE = (firstFixtureRound !== undefined && roundBEs[firstFixtureRound] !== undefined)
+      ? roundBEs[firstFixtureRound]
+      : ppts;
+    let chainPrice = startPrice;
+    let prevChainPrice = startPrice;
+    let chainBE = startBE;
     let gamesPlayed = gamesCount;
     const BE_SMOOTH_ALPHA = 1 / 3;
 
@@ -588,6 +615,19 @@ export default function PlayerDetailScreen() {
           </View>
         ) : null}
 
+        {/* Banner explaining that values flagged "Proj." are unofficial.
+            Shown only on the History tab when at least one row in
+            priceByRound is projected (= round still open after this
+            player's match has finished). Fixtures already prefixes its
+            columns with "PROJ" so the banner is redundant there.
+            Disappears as soon as Footywire publishes the official next-
+            round entry price. */}
+        {activeTab === 'history' && !isHistorical && Array.from(priceByRound.values()).some(r => r.projected) ? (
+          <Text style={hfStyles.projNote}>
+            Italicised values are projected. Official scores TBC.
+          </Text>
+        ) : null}
+
         {activeTab === 'history' && (
           <>
             <View style={hfStyles.headerRow}>
@@ -637,12 +677,29 @@ export default function PlayerDetailScreen() {
                   <View style={{ width: 64, alignItems: 'center', marginLeft: 4 }}>
                     {priceRow ? (
                       <>
-                        <Text style={[hfStyles.cell, { color: dollarColor, fontWeight: '700' }]} numberOfLines={1}>
+                        <Text
+                          style={[
+                            hfStyles.cell,
+                            {
+                              color: dollarColor,
+                              fontWeight: '700',
+                              // Projected (round still open): italicise so
+                              // it reads as unofficial at a glance.
+                              fontStyle: priceRow.projected ? 'italic' : 'normal',
+                            },
+                          ]}
+                          numberOfLines={1}
+                        >
                           {formatPrice(priceRow.price)}
                         </Text>
                         <Text style={{ fontSize: 9, color: dollarColor }} numberOfLines={1}>
                           {priceRow.delta !== 0 ? formatPriceChange(priceRow.delta) : '-'}
                         </Text>
+                        {priceRow.projected ? (
+                          <Text style={{ fontSize: 8, color: COLORS.warning, fontStyle: 'italic', fontWeight: '700' }}>
+                            Proj.
+                          </Text>
+                        ) : null}
                       </>
                     ) : (
                       <Text style={[hfStyles.cell, { color: COLORS.textMuted }]}>-</Text>
@@ -1140,4 +1197,14 @@ const hfStyles = StyleSheet.create({
   pillDraw: { backgroundColor: '#1e3a5f',              borderWidth: 1, borderColor: '#4a7fa5'      },
   pillText: { fontSize: 10, fontWeight: '800', color: COLORS.textPrimary },
   empty: { fontSize: 13, color: COLORS.textMuted, paddingTop: 12, textAlign: 'center' },
+  projNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    fontWeight: '600',
+    color: COLORS.warning,
+    paddingHorizontal: 4,
+    paddingBottom: 18,
+    paddingTop: 4,
+    textAlign: 'center',
+  },
 });

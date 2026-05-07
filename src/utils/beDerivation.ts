@@ -44,6 +44,16 @@ export interface RoundDataRow {
 export function deriveBEMap(
   roundData: RoundDataRow[],
   currentBE: number,
+  /**
+   * The round Footywire's published currentBE applies to. Defaults to
+   * `lastScored + 1` (the historical assumption). Pass the live
+   * `maxRound` from the store when calling so the chart attributes
+   * the BE to the round it's actually for — when R9 has just been
+   * played but R9 isn't fully closed yet, currentBE still represents
+   * R9's BE, not R10's. Without this, the dot landed at R10 and the
+   * R9 dot fell back to the previous round's value.
+   */
+  liveRound?: number,
 ): Record<number, number> {
   // Indices of the first two scored rows + the last scored row.
   let firstScoredIdx = -1;
@@ -80,8 +90,45 @@ export function deriveBEMap(
     }
   }
 
-  if (lastScoredIdx >= 0 && currentBE !== 0) {
-    result[roundData[lastScoredIdx].round + 1] = currentBE;
+  if (currentBE !== 0) {
+    // currentBE applies to the live round (the round Footywire's BE
+    // page is currently published for). Default to lastScored+1 if
+    // liveRound wasn't passed (back-compat with older callers and
+    // tests). When R9 has played but R9 isn't fully closed yet, the
+    // caller's maxRound is still 9, and currentBE is the BE Jackson
+    // *just played against* — pin it to R9, not R10.
+    const beRound = liveRound ?? (lastScoredIdx >= 0 ? roundData[lastScoredIdx].round + 1 : -1);
+    if (beRound > 0) {
+      result[beRound] = currentBE;
+    }
+
+    // Project the round AFTER the live round using Scobey's empirical
+    // BE formula (verified against his Xerri/McLuggage/Durham
+    // walkthroughs). This is what fills the chart's dot for next
+    // round when Footywire hasn't published it yet.
+    //
+    //   K        = currentBE + S_{R-1} + S_{R-2}
+    //   BE_{R+1} = K − S_R − S_{R-1}
+    //
+    // Only fires when liveRound matches the player's lastScoredRound
+    // (i.e., they've just played and we have S_R available).
+    if (
+      liveRound !== undefined &&
+      lastScoredIdx >= 0 &&
+      roundData[lastScoredIdx].round === liveRound
+    ) {
+      const playedRows = roundData
+        .filter(r => r.score !== null)
+        .sort((a, b) => a.round - b.round);
+      const len = playedRows.length;
+      if (len >= 3) {
+        const sR       = playedRows[len - 1].score ?? 0;
+        const sR_m1    = playedRows[len - 2].score ?? 0;
+        const sR_m2    = playedRows[len - 3].score ?? 0;
+        const K        = currentBE + sR_m1 + sR_m2;
+        result[liveRound + 1] = Math.round(K - sR - sR_m1);
+      }
+    }
   }
 
   return result;

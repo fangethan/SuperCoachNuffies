@@ -189,6 +189,43 @@ describe('deriveBEMap — currentBE handling', () => {
   });
 });
 
+describe('deriveBEMap — liveRound override (game just played, round still open)', () => {
+  test('currentBE lands at liveRound, not lastScored+1', () => {
+    // Jackson scenario: R7 = 147, R8 = 143, R9 = 141 just played.
+    // Footywire's currentBE was fetched while R9 still upcoming → 96.
+    // R9 isn't fully closed yet (other teams still playing), so the
+    // app's maxRound is still 9. The published 96 should map to R9.
+    const data = [
+      r(7, 610_300, 147),
+      r(8, 624_700, 143),
+      r(9, 642_400, 141),
+    ];
+    const map = deriveBEMap(data, 96, 9);
+    expect(map[9]).toBe(96);
+    // Round 10 should be PROJECTED via Scobey's K formula, not 96.
+    //   K = 96 + 143 + 147 = 386
+    //   BE_R10 = K - S_R9 - S_R8 = 386 - 141 - 143 = 102
+    expect(map[10]).toBe(102);
+  });
+
+  test('without liveRound argument, falls back to lastScored+1 (back-compat)', () => {
+    const data = [r(1, 200_000, 60), r(2, 200_000, 80)];
+    const map = deriveBEMap(data, 42);
+    expect(map[3]).toBe(42);
+    expect(map).not.toHaveProperty('4');
+  });
+
+  test('does not project R+1 if fewer than 3 played rounds available', () => {
+    // Need S_R, S_R-1, S_R-2 to compute Scobey's K. With only 2 played
+    // rounds, projection is skipped — R+1 stays absent rather than
+    // emitting an unreliable estimate.
+    const data = [r(8, 500_000, 100), r(9, 500_000, 110)];
+    const map = deriveBEMap(data, 80, 9);
+    expect(map[9]).toBe(80);
+    expect(map).not.toHaveProperty('10');
+  });
+});
+
 describe('deriveBEMap — empty / degenerate input', () => {
   test('empty roundData returns empty map', () => {
     expect(deriveBEMap([], 0)).toEqual({});

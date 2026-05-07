@@ -112,16 +112,24 @@ export function PlayerScoreChart({ perRoundScores, perRoundBE, avg, ppts }: Prop
     });
 
     // Walk forward: carry the last known BE; emit null until the first data point.
-    // For rounds AFTER the last played round (upcoming), show the current published
-    // ppts directly — handles both positive and negative BEs.
+    // For rounds AFTER the last played round (upcoming) with no derived BE, show
+    // the current published ppts directly — handles both positive and negative BEs.
     //
     // Important: `last` starts as null, NOT ppts. If we seeded with ppts, every
     // round before the player's first game would render with the player's
     // current/upcoming BE — which is wrong (e.g. a player who debuted round 1
     // would have a phantom dot at round 0 showing his current BE).
+    //
+    // beByRound entries take priority over the ppts fallback. When a player has
+    // just played (e.g. R9 done, R9 round still open), deriveBEMap projects R+1
+    // via Scobey's K formula and stores it in beByRound — that projected value
+    // must win over the raw ppts, which is the BE for the *current* live round.
     let last: number | null = null;
     return allRounds.map(r => {
-      if (beByRound.has(r)) last = beByRound.get(r)!;
+      if (beByRound.has(r)) {
+        last = beByRound.get(r)!;
+        return last;
+      }
       if (r > lastPlayedRound && ppts !== 0) return ppts;
       return last;
     });
