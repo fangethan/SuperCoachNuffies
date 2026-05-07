@@ -1,8 +1,8 @@
-import { useRef } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { footywireApi, PlayerRoundScores } from '../api/footywire';
 import { Player } from '../types';
-import { getJson, setJson } from '../store/cache';
+import { deleteJson, getJson, setJson } from '../store/cache';
 import { useAppStore } from '../store/useAppStore';
 import { CURRENT_YEAR } from '../constants';
 
@@ -21,9 +21,20 @@ export function useRoundScores(
   year: number,
   targetRound: number,
   players: Player[],
-): { data: Record<number, PlayerRoundScores>; isLoading: boolean } {
+): {
+  data: Record<number, PlayerRoundScores>;
+  isLoading: boolean;
+  /**
+   * Force-refresh this round's scores: wipes the SQLite cache row
+   * and re-runs the React Query fetch. Used by the player profile
+   * to recover when a match has finished but the per-player SC
+   * score hasn't been published yet at first fetch.
+   */
+  refresh: () => Promise<void>;
+} {
   const playersRef = useRef(players);
   playersRef.current = players;
+  const queryClient = useQueryClient();
 
   // Live round from the store — anything strictly below this is a completed
   // round and its scores are immutable. Reading once at hook-call time is
@@ -69,8 +80,18 @@ export function useRoundScores(
     placeholderData: (prev) => prev,
   });
 
+  const refresh = useCallback(async () => {
+    try {
+      await deleteJson(RS_KEY(year, targetRound));
+    } catch { /* ignore */ }
+    await queryClient.invalidateQueries({
+      queryKey: ['round-scores', 'v5', year, targetRound],
+    });
+  }, [queryClient, year, targetRound]);
+
   return {
     data: query.data ?? {},
     isLoading: query.isLoading,
+    refresh,
   };
 }

@@ -32,7 +32,7 @@ export default function PlayerDetailScreen() {
   const { data: players, isLoading } = usePlayers(selectedYear, viewRound);
   const { data: byeMap } = useByeRounds(selectedYear);
   const { data: fwMap } = useFootywireBreakevens();
-  const { data: roundScoresById } = useRoundScores(selectedYear, viewRound, players ?? []);
+  const { data: roundScoresById, refresh: refreshRoundScores } = useRoundScores(selectedYear, viewRound, players ?? []);
   const { data: matchList } = useMatchList(selectedYear);
   const [activeTab, setActiveTab] = useState<'history' | 'fixtures'>('history');
   const [yearModalOpen, setYearModalOpen] = useState(false);
@@ -132,6 +132,30 @@ export default function PlayerDetailScreen() {
   // the player did not play that year — suppresses every stat below.
   const histNoData = isHistorical && histSummary !== undefined && (histSummary?.games ?? 0) === 0;
 
+  // Auto-refresh stale per-round-scores: if Footywire has published a
+  // match result for this player's most recent fixture but our cached
+  // SC score for that round is still 0/missing, our useRoundScores
+  // cache pre-dates the score being posted. Force a one-time refresh
+  // for that round. The ref tracks which rounds we've already retried
+  // so we don't loop on a player who genuinely scored 0 / DNP'd.
+  const refreshedRoundsRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    if (!matchList || !player || !roundScoresById) return;
+    const myMatches = matchList.filter(
+      m => (m.homeTeam === player.team?.name || m.awayTeam === player.team?.name)
+        && m.homeScore !== null,
+    );
+    if (myMatches.length === 0) return;
+    const latest = myMatches.reduce((a, b) => (a.round > b.round ? a : b));
+    const myScores = roundScoresById[player.id]?.roundScores ?? {};
+    const sc = myScores[latest.round];
+    const hasNoScore = sc === undefined || sc === 0;
+    const tag = `${selectedYear}_${latest.round}_${player.id}`;
+    if (hasNoScore && !refreshedRoundsRef.current.has(tag)) {
+      refreshedRoundsRef.current.add(tag);
+      refreshRoundScores().catch(() => {});
+    }
+  }, [matchList, player, roundScoresById, selectedYear, refreshRoundScores]);
 
   if (isLoading) {
     return (
